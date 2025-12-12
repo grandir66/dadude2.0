@@ -34,6 +34,7 @@ NC='\033[0m'
 CTID=""
 HOSTNAME="dadude-agent"
 BRIDGE="vmbr0"
+VLAN=""
 STORAGE="local-lvm"
 TEMPLATE_STORAGE="local"  # Storage per template (tipo directory)
 MEMORY=512
@@ -60,6 +61,7 @@ while [[ $# -gt 0 ]]; do
         --ip) IP_CONFIG="$2"; shift 2 ;;
         --gateway) GATEWAY="$2"; shift 2 ;;
         --bridge) BRIDGE="$2"; shift 2 ;;
+        --vlan) VLAN="$2"; shift 2 ;;
         --storage) STORAGE="$2"; shift 2 ;;
         --memory) MEMORY="$2"; shift 2 ;;
         --disk) DISK="$2"; shift 2 ;;
@@ -80,10 +82,11 @@ if [ -z "$SERVER_URL" ]; then
     exit 1
 fi
 
+# Se nessun token, usa auto-registrazione
 if [ -z "$AGENT_TOKEN" ]; then
-    echo -e "${RED}Errore: --agent-token è richiesto${NC}"
-    echo "Genera un token nel pannello DaDude e usalo qui"
-    exit 1
+    AGENT_TOKEN=$(openssl rand -hex 16)
+    echo -e "${YELLOW}Nessun token specificato. L'agent userà auto-registrazione.${NC}"
+    echo -e "${YELLOW}Dopo l'avvio, approva l'agent da: ${SERVER_URL}/agents${NC}"
 fi
 
 # Verifica siamo su Proxmox
