@@ -437,12 +437,25 @@
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">Credenziali per identificazione</label>
-                        <select class="form-select" id="discoveryCredentials" multiple size="2">
-                            {% for cred in credentials %}
-                            <option value="{{ cred.id }}" {% if cred.credential_type in ['ssh', 'snmp', 'mikrotik'] %}selected{% endif %}>
+                        <select class="form-select" id="discoveryCredentials" multiple size="3">
+                            {% if global_credentials %}
+                            <optgroup label="🌐 Credenziali Globali">
+                            {% for cred in global_credentials %}
+                            <option value="{{ cred.id }}" {% if cred.credential_type in ['ssh', 'snmp', 'mikrotik'] and cred.is_default %}selected{% endif %}>
                                 {{ cred.name }} ({{ cred.credential_type }})
                             </option>
                             {% endfor %}
+                            </optgroup>
+                            {% endif %}
+                            {% if credentials %}
+                            <optgroup label="📁 Credenziali Cliente">
+                            {% for cred in credentials %}
+                            <option value="{{ cred.id }}" {% if cred.credential_type in ['ssh', 'snmp', 'mikrotik'] and cred.is_default %}selected{% endif %}>
+                                {{ cred.name }} ({{ cred.credential_type }})
+                            </option>
+                            {% endfor %}
+                            </optgroup>
+                            {% endif %}
                         </select>
                     </div>
                     <div class="col-md-2 d-flex align-items-end">

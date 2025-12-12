@@ -284,6 +284,41 @@ async def delete_credential(credential_id: str):
 
 
 # ==========================================
+# GLOBAL CREDENTIALS ENDPOINTS
+# ==========================================
+
+@router.get("/credentials", response_model=CredentialListResponse)
+async def list_global_credentials(
+    credential_type: Optional[str] = Query(None, description="Filtra per tipo"),
+):
+    """
+    Lista credenziali globali (disponibili a tutti i clienti).
+    """
+    service = get_customer_service()
+    credentials = service.list_global_credentials(credential_type=credential_type)
+    return CredentialListResponse(total=len(credentials), credentials=credentials)
+
+
+@router.post("/credentials", response_model=CredentialSafe, status_code=201)
+async def create_global_credential(data: CredentialCreate):
+    """
+    Crea nuove credenziali globali.
+    """
+    service = get_customer_service()
+    
+    # Forza is_global a True e rimuovi customer_id
+    data.is_global = True
+    data.customer_id = None
+    
+    try:
+        credential = service.create_credential(data)
+        return credential
+    except Exception as e:
+        logger.error(f"Error creating global credential: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
 # DEVICE ASSIGNMENTS ENDPOINTS
 # ==========================================
 

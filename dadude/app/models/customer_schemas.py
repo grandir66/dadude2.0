@@ -224,6 +224,7 @@ class CredentialBase(BaseModel):
 class CredentialCreate(CredentialBase):
     """Schema creazione credenziali (con password)"""
     customer_id: Optional[str] = None  # Opzionale, viene impostato dal router
+    is_global: bool = False  # True = credenziale globale disponibile a tutti
     password: Optional[str] = None
     # SSH
     ssh_private_key: Optional[str] = None
@@ -305,11 +306,13 @@ class Credential(CredentialBase):
 class CredentialSafe(CredentialBase):
     """Schema credenziali senza dati sensibili (per API)"""
     id: str
-    customer_id: str
+    customer_id: Optional[str] = None  # NULL = credenziale globale
+    is_global: bool = False
     has_password: bool = False
     has_ssh_key: bool = False
     has_api_key: bool = False
     has_vpn_config: bool = False
+    used_by_count: int = 0  # Quanti clienti usano questa credenziale
     created_at: datetime
     updated_at: datetime
     

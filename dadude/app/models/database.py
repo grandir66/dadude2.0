@@ -98,11 +98,13 @@ class Credential(Base):
     """
     Credenziali per accesso ai dispositivi del cliente
     Possono essere di default per il cliente o specifiche per device
+    Credenziali globali hanno customer_id=NULL e is_global=True
     """
     __tablename__ = "credentials"
     
     id = Column(String(8), primary_key=True, default=generate_uuid)
-    customer_id = Column(String(8), ForeignKey("customers.id"), nullable=False)
+    customer_id = Column(String(8), ForeignKey("customers.id"), nullable=True)  # NULL = globale
+    is_global = Column(Boolean, default=False)  # True = disponibile per tutti i clienti
     
     name = Column(String(100), nullable=False)  # Es: "Router Admin", "Switch Default"
     credential_type = Column(String(50), default="device")  # device, snmp, ssh, wmi, mikrotik, api, vpn, other

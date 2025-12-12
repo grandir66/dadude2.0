@@ -158,6 +158,7 @@ async def customer_detail_page(request: Request, customer_id: str):
     
     networks = customer_service.list_networks(customer_id=customer_id, active_only=False)
     credentials = customer_service.list_credentials(customer_id=customer_id, active_only=False)
+    global_credentials = customer_service.list_global_credentials(active_only=True)
     devices = customer_service.list_device_assignments(customer_id=customer_id, active_only=False)
     agents = customer_service.list_agents(customer_id=customer_id, active_only=False)
     
@@ -168,8 +169,29 @@ async def customer_detail_page(request: Request, customer_id: str):
         "customer": customer,
         "networks": networks,
         "credentials": credentials,
+        "global_credentials": global_credentials,
         "devices": devices,
         "agents": agents,
+    })
+
+
+# ==========================================
+# CREDENTIALS PAGE
+# ==========================================
+
+@router.get("/credentials", response_class=HTMLResponse)
+async def credentials_page(request: Request):
+    """Pagina credenziali globali"""
+    customer_service = get_customer_service()
+    
+    # Ottieni credenziali globali (senza customer_id)
+    credentials = customer_service.list_global_credentials()
+    
+    return templates.TemplateResponse("credentials.html", {
+        "request": request,
+        "page": "credentials",
+        "title": "Credenziali Globali",
+        "credentials": credentials,
     })
 
 

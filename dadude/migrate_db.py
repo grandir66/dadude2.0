@@ -137,6 +137,21 @@ def migrate_database(db_path: str = "./data/dadude.db"):
             print("Aggiungo colonna dns_server a agent_assignments...")
             cursor.execute("ALTER TABLE agent_assignments ADD COLUMN dns_server VARCHAR(255)")
         
+        # Verifica colonne esistenti in credentials
+        cursor.execute("PRAGMA table_info(credentials)")
+        columns = [row[1] for row in cursor.fetchall()]
+        
+        print(f"Colonne esistenti in credentials: {columns}")
+        
+        # Aggiungi is_global se mancante
+        if 'is_global' not in columns:
+            print("Aggiungo colonna is_global a credentials...")
+            cursor.execute("ALTER TABLE credentials ADD COLUMN is_global BOOLEAN DEFAULT 0")
+        
+        # Rendi customer_id nullable (non possibile in SQLite, ma almeno possiamo inserire NULL)
+        # In SQLite non è possibile modificare le constraint, quindi per le nuove credenziali globali
+        # il customer_id sarà NULL
+        
         conn.commit()
         print("✓ Migrazione completata con successo!")
         

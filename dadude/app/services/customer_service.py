@@ -297,7 +297,8 @@ class CustomerService:
         encryption = get_encryption_service()
         try:
             credential = CredentialDB(
-                customer_id=data.customer_id,
+                customer_id=data.customer_id if not data.is_global else None,
+                is_global=data.is_global,
                 name=data.name,
                 credential_type=data.credential_type.value,
                 username=data.username,
@@ -351,6 +352,7 @@ class CustomerService:
         return CredentialSafe(
             id=cred.id,
             customer_id=cred.customer_id,
+            is_global=cred.is_global or False,
             name=cred.name,
             credential_type=cred.credential_type,
             username=cred.username,
@@ -467,6 +469,71 @@ class CustomerService:
             
             if customer_id:
                 query = query.filter(CredentialDB.customer_id == customer_id)
+            if credential_type:
+                query = query.filter(CredentialDB.credential_type == credential_type)
+            if active_only:
+                query = query.filter(CredentialDB.active == True)
+            
+            return [self._to_credential_safe(c) for c in query.all()]
+            
+        finally:
+            session.close()
+    
+    def list_global_credentials(
+        self,
+        credential_type: Optional[str] = None,
+        active_only: bool = True,
+    ) -> List[CredentialSafe]:
+        """Lista credenziali globali (senza customer_id)"""
+        session = self._get_session()
+        try:
+            query = session.query(CredentialDB).filter(
+                CredentialDB.is_global == True
+            )
+            
+            if credential_type:
+                query = query.filter(CredentialDB.credential_type == credential_type)
+            if active_only:
+                query = query.filter(CredentialDB.active == True)
+            
+            credentials = []
+            for c in query.all():
+                cred_safe = self._to_credential_safe(c)
+                # Conta quanti clienti usano questa credenziale
+                cred_safe.used_by_count = self._count_credential_usage(session, c.id)
+                credentials.append(cred_safe)
+            
+            return credentials
+            
+        finally:
+            session.close()
+    
+    def _count_credential_usage(self, session, credential_id: str) -> int:
+        """Conta quanti clienti utilizzano una credenziale globale"""
+        # Questo potrebbe essere implementato con una tabella di join
+        # Per ora ritorna 0
+        return 0
+    
+    def list_available_credentials(
+        self,
+        customer_id: str,
+        credential_type: Optional[str] = None,
+        active_only: bool = True,
+    ) -> List[CredentialSafe]:
+        """
+        Lista credenziali disponibili per un cliente.
+        Include sia le credenziali del cliente che quelle globali.
+        """
+        session = self._get_session()
+        try:
+            # Credenziali del cliente
+            query = session.query(CredentialDB).filter(
+                or_(
+                    CredentialDB.customer_id == customer_id,
+                    CredentialDB.is_global == True
+                )
+            )
+            
             if credential_type:
                 query = query.filter(CredentialDB.credential_type == credential_type)
             if active_only:
