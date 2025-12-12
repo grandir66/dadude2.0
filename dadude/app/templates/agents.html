@@ -1,0 +1,470 @@
+{% extends "base.html" %}
+
+{% block title %}Gestione Agent - DaDude{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-robot"></i> Gestione Agent</h2>
+        <button class="btn btn-outline-primary" onclick="loadAgents()">
+            <i class="bi bi-arrow-clockwise"></i> Aggiorna
+        </button>
+    </div>
+
+    <!-- Agent in attesa di approvazione -->
+    <div class="card mb-4">
+        <div class="card-header bg-warning text-dark">
+            <h5 class="mb-0">
+                <i class="bi bi-hourglass-split"></i> Agent in Attesa di Approvazione
+                <span id="pending-count" class="badge bg-dark ms-2">0</span>
+            </h5>
+        </div>
+        <div class="card-body">
+            <div id="pending-agents">
+                <div class="text-center text-muted py-4">
+                    <i class="bi bi-search fs-1"></i>
+                    <p class="mt-2">Caricamento...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Attivi -->
+    <div class="card mb-4">
+        <div class="card-header bg-success text-white">
+            <h5 class="mb-0">
+                <i class="bi bi-check-circle"></i> Agent Attivi
+                <span id="active-count" class="badge bg-light text-dark ms-2">0</span>
+            </h5>
+        </div>
+        <div class="card-body">
+            <div id="active-agents">
+                <div class="text-center text-muted py-4">
+                    <i class="bi bi-search fs-1"></i>
+                    <p class="mt-2">Caricamento...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Outdated -->
+    <div class="card">
+        <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+                <i class="bi bi-arrow-up-circle"></i> Aggiornamenti Disponibili
+                <span id="outdated-count" class="badge bg-light text-dark ms-2">0</span>
+            </h5>
+            <button class="btn btn-sm btn-light" onclick="updateAllAgents()" id="update-all-btn" style="display: none;">
+                <i class="bi bi-download"></i> Aggiorna Tutti
+            </button>
+        </div>
+        <div class="card-body">
+            <div id="outdated-agents">
+                <div class="text-center text-muted py-4">
+                    <i class="bi bi-check-lg fs-1"></i>
+                    <p class="mt-2">Tutti gli agent sono aggiornati</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Approva Agent -->
+<div class="modal fade" id="approveModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Approva Agent</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Agent</label>
+                    <input type="text" class="form-control" id="approve-agent-name" readonly>
+                    <input type="hidden" id="approve-agent-id">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Indirizzo IP</label>
+                    <input type="text" class="form-control" id="approve-agent-ip" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Assegna a Cliente *</label>
+                    <select class="form-select" id="approve-customer-id" required>
+                        <option value="">-- Seleziona Cliente --</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                <button type="button" class="btn btn-success" onclick="confirmApprove()">
+                    <i class="bi bi-check-lg"></i> Approva
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let customers = [];
+
+async function loadAgents() {
+    await Promise.all([
+        loadPendingAgents(),
+        loadActiveAgents(),
+        loadOutdatedAgents(),
+        loadCustomers()
+    ]);
+}
+
+async function loadCustomers() {
+    try {
+        const response = await fetch('/api/v1/customers/');
+        if (response.ok) {
+            customers = await response.json();
+            
+            // Popola dropdown
+            const select = document.getElementById('approve-customer-id');
+            select.innerHTML = '<option value="">-- Seleziona Cliente --</option>';
+            customers.forEach(c => {
+                select.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+            });
+        }
+    } catch (e) {
+        console.error('Error loading customers:', e);
+    }
+}
+
+async function loadPendingAgents() {
+    const container = document.getElementById('pending-agents');
+    
+    try {
+        const response = await fetch('/api/v1/agents/pending');
+        if (!response.ok) throw new Error('Failed to load pending agents');
+        
+        const data = await response.json();
+        document.getElementById('pending-count').textContent = data.total;
+        
+        if (data.total === 0) {
+            container.innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <i class="bi bi-check-circle fs-1"></i>
+                    <p class="mt-2">Nessun agent in attesa di approvazione</p>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = `
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Indirizzo</th>
+                        <th>Tipo</th>
+                        <th>Versione</th>
+                        <th>Registrato</th>
+                        <th>Azioni</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${data.agents.map(a => `
+                        <tr>
+                            <td><strong>${a.name}</strong></td>
+                            <td><code>${a.address}</code></td>
+                            <td><span class="badge bg-secondary">${a.agent_type || 'docker'}</span></td>
+                            <td>${a.version || 'N/A'}</td>
+                            <td>${a.created_at ? new Date(a.created_at).toLocaleString() : 'N/A'}</td>
+                            <td>
+                                <button class="btn btn-sm btn-success" onclick="showApproveModal('${a.id}', '${a.name}', '${a.address}')">
+                                    <i class="bi bi-check-lg"></i> Approva
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="rejectAgent('${a.id}')">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+        
+    } catch (e) {
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                Errore nel caricamento: ${e.message}
+            </div>
+        `;
+    }
+}
+
+async function loadActiveAgents() {
+    const container = document.getElementById('active-agents');
+    
+    try {
+        // Carica tutti gli agent assegnati dai clienti
+        const response = await fetch('/api/v1/customers/');
+        if (!response.ok) throw new Error('Failed to load customers');
+        
+        const customers = await response.json();
+        let allAgents = [];
+        
+        for (const customer of customers) {
+            const agentsResp = await fetch(`/api/v1/customers/${customer.id}/agents`);
+            if (agentsResp.ok) {
+                const agents = await agentsResp.json();
+                agents.forEach(a => {
+                    allAgents.push({...a, customer_name: customer.name, customer_id: customer.id});
+                });
+            }
+        }
+        
+        document.getElementById('active-count').textContent = allAgents.length;
+        
+        if (allAgents.length === 0) {
+            container.innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <i class="bi bi-robot fs-1"></i>
+                    <p class="mt-2">Nessun agent attivo</p>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = `
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Cliente</th>
+                        <th>Indirizzo</th>
+                        <th>Tipo</th>
+                        <th>Stato</th>
+                        <th>Versione</th>
+                        <th>Azioni</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${allAgents.map(a => `
+                        <tr>
+                            <td><strong>${a.name}</strong></td>
+                            <td><a href="/customers/${a.customer_id}">${a.customer_name}</a></td>
+                            <td><code>${a.address}</code></td>
+                            <td><span class="badge ${a.agent_type === 'docker' ? 'bg-info' : 'bg-primary'}">${a.agent_type || 'mikrotik'}</span></td>
+                            <td>
+                                <span class="badge ${a.active ? 'bg-success' : 'bg-secondary'}">
+                                    ${a.active ? 'Attivo' : 'Inattivo'}
+                                </span>
+                            </td>
+                            <td>${a.version || 'N/A'}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-primary" onclick="testAgent('${a.id}', '${a.address}', ${a.agent_api_port || 8080})">
+                                    <i class="bi bi-broadcast"></i> Test
+                                </button>
+                                <button class="btn btn-sm btn-outline-warning" onclick="restartAgent('${a.id}')">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+        
+    } catch (e) {
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                Errore nel caricamento: ${e.message}
+            </div>
+        `;
+    }
+}
+
+async function loadOutdatedAgents() {
+    const container = document.getElementById('outdated-agents');
+    
+    try {
+        const response = await fetch('/api/v1/agents/outdated');
+        if (!response.ok) throw new Error('Failed to load outdated agents');
+        
+        const data = await response.json();
+        document.getElementById('outdated-count').textContent = data.outdated_count;
+        
+        if (data.outdated_count === 0) {
+            container.innerHTML = `
+                <div class="text-center text-muted py-4">
+                    <i class="bi bi-check-lg fs-1"></i>
+                    <p class="mt-2">Tutti gli agent sono aggiornati (v${data.latest_version})</p>
+                </div>
+            `;
+            document.getElementById('update-all-btn').style.display = 'none';
+            return;
+        }
+        
+        document.getElementById('update-all-btn').style.display = 'block';
+        
+        container.innerHTML = `
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Indirizzo</th>
+                        <th>Versione Attuale</th>
+                        <th>Versione Disponibile</th>
+                        <th>Azioni</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${data.outdated_agents.map(a => `
+                        <tr>
+                            <td><strong>${a.name}</strong></td>
+                            <td><code>${a.address}</code></td>
+                            <td><span class="badge bg-warning text-dark">${a.current_version}</span></td>
+                            <td><span class="badge bg-success">${a.latest_version}</span></td>
+                            <td>
+                                <button class="btn btn-sm btn-primary" onclick="updateAgent('${a.id}')">
+                                    <i class="bi bi-download"></i> Aggiorna
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+        
+    } catch (e) {
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                Errore nel caricamento: ${e.message}
+            </div>
+        `;
+    }
+}
+
+function showApproveModal(agentId, agentName, agentIp) {
+    document.getElementById('approve-agent-id').value = agentId;
+    document.getElementById('approve-agent-name').value = agentName;
+    document.getElementById('approve-agent-ip').value = agentIp;
+    
+    new bootstrap.Modal(document.getElementById('approveModal')).show();
+}
+
+async function confirmApprove() {
+    const agentId = document.getElementById('approve-agent-id').value;
+    const customerId = document.getElementById('approve-customer-id').value;
+    
+    if (!customerId) {
+        alert('Seleziona un cliente');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/agents/${agentId}/approve?customer_id=${customerId}`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('approveModal')).hide();
+            alert('Agent approvato con successo!');
+            loadAgents();
+        } else {
+            const data = await response.json();
+            alert('Errore: ' + (data.detail || 'Approvazione fallita'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+async function rejectAgent(agentId) {
+    if (!confirm('Eliminare questo agent in attesa?')) return;
+    
+    try {
+        const response = await fetch(`/api/v1/customers/agents/${agentId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            loadAgents();
+        } else {
+            alert('Errore nella cancellazione');
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+async function testAgent(agentId, address, port) {
+    try {
+        const response = await fetch(`http://${address}:${port}/health`, {
+            mode: 'cors',
+            headers: { 'Accept': 'application/json' }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            alert(`✅ Agent OK\n\nID: ${data.agent_id}\nNome: ${data.agent_name}\nVersione: ${data.version}`);
+        } else {
+            alert('❌ Agent non raggiungibile');
+        }
+    } catch (e) {
+        alert('❌ Errore: ' + e.message);
+    }
+}
+
+async function restartAgent(agentId) {
+    if (!confirm('Riavviare questo agent?')) return;
+    
+    try {
+        const response = await fetch(`/api/v1/agents/${agentId}/restart`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            alert('Comando di riavvio inviato');
+        } else {
+            alert('Errore nell\'invio del comando');
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+async function updateAgent(agentId) {
+    try {
+        const response = await fetch(`/api/v1/agents/${agentId}/trigger-update`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            alert('Aggiornamento avviato');
+            setTimeout(loadAgents, 5000);
+        } else {
+            alert('Errore: ' + (data.error || data.message));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+async function updateAllAgents() {
+    if (!confirm('Aggiornare tutti gli agent?')) return;
+    
+    try {
+        const response = await fetch('/api/v1/agents/update-all', {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        alert(`Aggiornati: ${data.total_updated}\nFalliti: ${data.total_failed}`);
+        setTimeout(loadAgents, 5000);
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+// Carica al load
+document.addEventListener('DOMContentLoaded', loadAgents);
+</script>
+{% endblock %}
+

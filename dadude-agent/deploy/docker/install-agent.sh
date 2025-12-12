@@ -2,7 +2,10 @@
 #
 # DaDude Agent - Installazione Docker
 # 
-# Uso:
+# Uso (con auto-registrazione):
+#   curl -sSL https://raw.githubusercontent.com/grandir66/dadude/main/dadude-agent/deploy/docker/install-agent.sh | bash -s -- --server http://192.168.4.45:8000
+#
+# Uso (con token pre-esistente):
 #   curl -sSL https://raw.githubusercontent.com/grandir66/dadude/main/dadude-agent/deploy/docker/install-agent.sh | bash -s -- --server http://192.168.4.45:8000 --token YOUR_TOKEN
 #
 
@@ -22,12 +25,13 @@ SERVER_URL=""
 AGENT_TOKEN=""
 AGENT_NAME=""
 DNS_SERVERS=""
+AUTO_REGISTER=true
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --server) SERVER_URL="$2"; shift 2 ;;
-        --token) AGENT_TOKEN="$2"; shift 2 ;;
+        --token) AGENT_TOKEN="$2"; AUTO_REGISTER=false; shift 2 ;;
         --name) AGENT_NAME="$2"; shift 2 ;;
         --port) AGENT_PORT="$2"; shift 2 ;;
         --dns) DNS_SERVERS="$2"; shift 2 ;;
@@ -39,11 +43,14 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Opzioni:"
             echo "  --server URL     URL del server DaDude (richiesto)"
-            echo "  --token TOKEN    Token di autenticazione (richiesto)"
+            echo "  --token TOKEN    Token di autenticazione (opzionale - auto-registrazione se omesso)"
             echo "  --name NAME      Nome dell'agent (default: hostname)"
             echo "  --port PORT      Porta API agent (default: 8080)"
             echo "  --dns SERVERS    Server DNS (es: 8.8.8.8,1.1.1.1)"
             echo "  --dir DIR        Directory installazione"
+            echo ""
+            echo "Se --token non viene specificato, l'agent si registrerà automaticamente"
+            echo "e dovrà essere approvato dal pannello DaDude (Agent → In Attesa)."
             exit 0
             ;;
         *) echo "Opzione sconosciuta: $1"; exit 1 ;;
@@ -59,14 +66,15 @@ echo -e "${NC}"
 # Verifica parametri richiesti
 if [ -z "$SERVER_URL" ]; then
     echo -e "${RED}Errore: --server è richiesto${NC}"
-    echo "Esempio: $0 --server http://192.168.4.45:8000 --token abc123"
+    echo "Esempio: $0 --server http://192.168.4.45:8000"
     exit 1
 fi
 
+# Genera token temporaneo se non specificato
 if [ -z "$AGENT_TOKEN" ]; then
-    echo -e "${RED}Errore: --token è richiesto${NC}"
-    echo "Genera un token dal pannello DaDude: Clienti → [Cliente] → Sonde → Nuova Sonda"
-    exit 1
+    AGENT_TOKEN=$(openssl rand -hex 16)
+    echo -e "${YELLOW}Nessun token specificato. L'agent userà auto-registrazione.${NC}"
+    echo -e "${YELLOW}Dopo l'avvio, approva l'agent dal pannello DaDude.${NC}"
 fi
 
 # Default agent name
@@ -187,12 +195,15 @@ if curl -s http://localhost:${AGENT_PORT}/health &>/dev/null; then
     echo -e "  ${GREEN}Server:${NC}     ${SERVER_URL}"
     echo ""
     echo -e "${YELLOW}Prossimi passi:${NC}"
-    echo "1. Registra l'agent nel pannello DaDude:"
-    echo "   - Vai su Clienti → [Cliente] → Sonde → Nuova Sonda"
-    echo "   - Tipo: Docker"
-    echo "   - Indirizzo: ${AGENT_IP}"
-    echo "   - Porta API: ${AGENT_PORT}"
-    echo "   - Token: ${AGENT_TOKEN}"
+    echo ""
+    echo -e "${BLUE}L'agent si è registrato automaticamente sul server.${NC}"
+    echo "Vai sul pannello DaDude per approvarlo:"
+    echo ""
+    echo "   1. Apri: ${SERVER_URL}/agents"
+    echo "   2. Nella sezione 'Agent in Attesa', clicca 'Approva'"
+    echo "   3. Seleziona il cliente a cui assegnare l'agent"
+    echo ""
+    echo "Una volta approvato, l'agent sarà attivo e pronto per le scansioni."
     echo ""
     echo "Comandi utili:"
     echo "  cd ${INSTALL_DIR}/dadude-agent"

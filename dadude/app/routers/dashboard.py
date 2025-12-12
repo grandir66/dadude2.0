@@ -252,6 +252,20 @@ async def credentials_page(request: Request):
 
 
 # ==========================================
+# AGENTS PAGE
+# ==========================================
+
+@router.get("/agents", response_class=HTMLResponse)
+async def agents_page(request: Request):
+    """Pagina gestione agent"""
+    return templates.TemplateResponse("agents.html", {
+        "request": request,
+        "page": "agents",
+        "title": "Gestione Agent",
+    })
+
+
+# ==========================================
 # CONFIGURATION PAGES
 # ==========================================
 
