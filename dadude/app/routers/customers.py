@@ -923,24 +923,31 @@ async def scan_customer_networks(
     # Verifica tipo agent
     agent_type = getattr(agent, 'agent_type', 'mikrotik') or 'mikrotik'
     
+    logger.info(f"Scan request: agent_type={agent_type}, agent_id={agent.id}, address={agent.address}")
+    
     if agent_type == "docker":
         # Scansione tramite Docker Agent
         from ..services.agent_client import AgentClient, AgentConfig
         
         agent_url = agent.agent_url or f"http://{agent.address}:{agent.agent_api_port or 8080}"
+        agent_token = agent.agent_token or ""
+        
+        logger.info(f"Docker agent config: url={agent_url}, token={'***' if agent_token else 'MISSING'}")
+        
         agent_config = AgentConfig(
             agent_id=agent.id,
             agent_url=agent_url,
-            agent_token=agent.agent_token or "",
+            agent_token=agent_token,
         )
         
         agent_client = AgentClient(agent_config)
         try:
             # Scansione rete tramite Docker agent
-            # L'agent farà ping/arp scan della rete
+            logger.info(f"Starting network scan via Docker agent: network={network.ip_network}")
             scan_result = await agent_client.scan_network(network.ip_network, scan_type=scan_type)
+            logger.info(f"Docker agent scan result: {scan_result}")
         except Exception as e:
-            logger.error(f"Docker agent scan failed: {e}")
+            logger.error(f"Docker agent scan failed: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Errore scansione Docker agent: {e}")
         finally:
             await agent_client.close()

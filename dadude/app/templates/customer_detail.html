@@ -423,11 +423,15 @@
                         </select>
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label">Sonda MikroTik</label>
+                        <label class="form-label">Sonda</label>
                         <select class="form-select" id="discoveryAgent">
                             <option value="">-- Seleziona sonda --</option>
                             {% for agent in agents %}
-                            <option value="{{ agent.id }}">{{ agent.name }} ({{ agent.address }})</option>
+                            {% set agent_type = agent.agent_type if agent.agent_type else 'mikrotik' %}
+                            <option value="{{ agent.id }}" data-agent-type="{{ agent_type }}">
+                                {% if agent_type == 'docker' %}🐳{% else %}📡{% endif %}
+                                {{ agent.name }} ({{ agent.address }})
+                            </option>
                             {% endfor %}
                         </select>
                     </div>
@@ -1923,14 +1927,18 @@ async function runCustomerDiscovery() {
     const networkCidr = networkSelect ? networkSelect.value : '';
     const agentId = agentSelect ? agentSelect.value : '';
     
-    console.log('Discovery - Network:', networkCidr, 'Agent:', agentId);
+    // Ottieni il tipo di agent dall'attributo data
+    const selectedOption = agentSelect ? agentSelect.options[agentSelect.selectedIndex] : null;
+    const agentType = selectedOption ? selectedOption.getAttribute('data-agent-type') || 'mikrotik' : 'mikrotik';
+    
+    console.log('Discovery - Network:', networkCidr, 'Agent:', agentId, 'Type:', agentType);
     
     if (!networkCidr) {
         alert('Seleziona una rete da scansionare');
         return;
     }
     if (!agentId) {
-        alert('Seleziona una sonda MikroTik per la scansione');
+        alert('Seleziona una sonda per la scansione');
         return;
     }
     
@@ -1943,17 +1951,44 @@ async function runCustomerDiscovery() {
     section.style.display = 'none';
     
     try {
-        // Scansiona via sonda MikroTik
-        const scanUrl = `/api/v1/mikrotik/agents/${agentId}/ip-scan?network=${encodeURIComponent(networkCidr)}`;
+        let scanUrl;
+        if (agentType === 'docker') {
+            // Scansiona via Docker Agent
+            scanUrl = `/api/v1/customers/agents/${agentId}/scan-customer-networks?scan_type=ping`;
+        } else {
+            // Scansiona via sonda MikroTik
+            scanUrl = `/api/v1/mikrotik/agents/${agentId}/ip-scan?network=${encodeURIComponent(networkCidr)}`;
+        }
+        
         const scanResponse = await fetch(scanUrl, { method: 'POST' });
         const scanData = await scanResponse.json();
         
-        if (!scanData.success) {
-            throw new Error(scanData.error || 'Scansione fallita');
+        // Gestisci formati diversi di risposta (MikroTik vs Docker)
+        let scanResults = [];
+        
+        if (agentType === 'docker') {
+            // Formato Docker: { networks_scanned: N, results: [{ network_id, success, devices_found, devices: [...] }] }
+            if (scanData.results && scanData.results.length > 0) {
+                const firstResult = scanData.results[0];
+                if (!firstResult.success) {
+                    throw new Error(firstResult.error || 'Scansione fallita');
+                }
+                // I dispositivi sono già salvati nel DB, li recuperiamo dalla view_url
+                // Per ora usiamo i risultati del ping scan
+                scanResults = firstResult.devices || [];
+            } else if (scanData.error) {
+                throw new Error(scanData.error);
+            }
+        } else {
+            // Formato MikroTik: { success: bool, results: [...] }
+            if (!scanData.success) {
+                throw new Error(scanData.error || 'Scansione fallita');
+            }
+            scanResults = scanData.results || [];
         }
         
         // Filtra solo device con MAC
-        const devicesWithMac = scanData.results.filter(d => d.mac_address && d.mac_address.trim() !== '');
+        const devicesWithMac = scanResults.filter(d => d.mac_address && d.mac_address.trim() !== '');
         
         if (devicesWithMac.length === 0) {
             alert('Nessun dispositivo con MAC address trovato');

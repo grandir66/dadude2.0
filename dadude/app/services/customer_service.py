@@ -904,15 +904,23 @@ class CustomerService:
             
             result = AgentAssignment.model_validate(agent)
             
+            enc_service = get_encryption_service()
+            
             # Decrypt password se richiesto
             if include_password and agent.password:
-                enc_service = get_encryption_service()
                 try:
                     result.password = enc_service.decrypt(agent.password)
                 except:
-                    result.password = None
+                    result.password = agent.password  # Fallback a valore in chiaro
             else:
                 result.password = None
+            
+            # Decrypt agent_token se presente
+            if include_password and agent.agent_token:
+                try:
+                    result.agent_token = enc_service.decrypt(agent.agent_token)
+                except:
+                    result.agent_token = agent.agent_token  # Fallback a valore in chiaro
             
             return result
             
