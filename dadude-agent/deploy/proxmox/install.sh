@@ -358,31 +358,26 @@ cd /opt/dadude-agent
 if ! docker pull ghcr.io/dadude/agent:latest 2>/dev/null; then
     echo "Immagine non trovata su registry, costruisco localmente..."
     
-    # Crea Dockerfile inline con nmap per network scanning
+    # Crea Dockerfile inline con nmap per network scanning (Debian per stabilità)
     cat > Dockerfile << "DOCKERFILE"
-FROM python:3.11-alpine
+FROM python:3.11-slim
 
 WORKDIR /app
 
 # Install system dependencies + nmap
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    musl-dev \
     libffi-dev \
-    openssl-dev \
-    cargo \
-    iputils \
-    bind-tools \
+    iputils-ping \
+    dnsutils \
     net-tools \
     iproute2 \
     nmap \
-    && rm -rf /var/cache/apk/*
+    procps \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && rm -rf /root/.cache/pip
-
-# Remove build dependencies
-RUN apk del gcc musl-dev libffi-dev openssl-dev cargo
 
 COPY app/ ./app/
 

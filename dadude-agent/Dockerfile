@@ -1,29 +1,28 @@
 # DaDude Agent - Lightweight Docker image for network scanning
 # Ottimizzato per MikroTik RouterOS 7 Container
 
-FROM python:3.11-alpine
+FROM python:3.11-slim
 
 # Metadata
 LABEL maintainer="DaDude Team"
 LABEL description="Network scanning agent for DaDude inventory system"
 LABEL version="1.0.0"
 
+# Create app directory
+WORKDIR /app
+
 # Install system dependencies + network tools + nmap
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
-    musl-dev \
     libffi-dev \
-    openssl-dev \
-    cargo \
-    iputils \
-    bind-tools \
+    iputils-ping \
+    dnsutils \
     net-tools \
     iproute2 \
     nmap \
-    && rm -rf /var/cache/apk/*
-
-# Create app directory
-WORKDIR /app
+    procps \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for caching
 COPY requirements.txt .
@@ -32,22 +31,16 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && rm -rf /root/.cache/pip
 
-# Remove build dependencies to reduce image size
-RUN apk del gcc musl-dev libffi-dev openssl-dev cargo
-
 # Copy application code
 COPY app/ ./app/
 COPY config/ ./config/
-
-# Run as root for network operations (ping, ARP, etc.)
-# In production, consider using capabilities instead
 
 # Expose API port
 EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget -q --spider http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:8080/health || exit 1
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
