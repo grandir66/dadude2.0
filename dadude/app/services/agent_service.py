@@ -56,12 +56,18 @@ class AgentService:
         if network_id:
             for agent in agents:
                 if agent.assigned_networks and network_id in agent.assigned_networks:
-                    return self._agent_to_dict(agent)
+                    # Ottieni agent completo con password
+                    full_agent = self._customer_service.get_agent(agent.id, include_password=True)
+                    if full_agent:
+                        return self._agent_to_dict(full_agent)
         
         # Altrimenti prendi il primo agent attivo
         for agent in agents:
             if agent.active:
-                return self._agent_to_dict(agent)
+                # Ottieni agent completo con password
+                full_agent = self._customer_service.get_agent(agent.id, include_password=True)
+                if full_agent:
+                    return self._agent_to_dict(full_agent)
         
         return None
     
@@ -71,23 +77,26 @@ class AgentService:
             "id": agent.id,
             "name": agent.name,
             "address": agent.address,
-            "port": agent.port,
+            "port": getattr(agent, 'port', 8728),
             "agent_type": getattr(agent, 'agent_type', 'mikrotik'),
-            "username": agent.username,
-            "use_ssl": agent.use_ssl,
-            "ssh_port": agent.ssh_port,
+            "username": getattr(agent, 'username', None),
+            "use_ssl": getattr(agent, 'use_ssl', False),
+            "ssh_port": getattr(agent, 'ssh_port', 22),
             "agent_api_port": getattr(agent, 'agent_api_port', 8080),
             "agent_url": getattr(agent, 'agent_url', None),
             "dns_server": getattr(agent, 'dns_server', None),
-            "status": agent.status,
+            "status": getattr(agent, 'status', 'unknown'),
         }
         
-        # Decripta password
-        if agent.password:
+        # Decripta password (potrebbe non esistere in AgentAssignmentSafe)
+        password = getattr(agent, 'password', None)
+        if password:
             try:
-                result["password"] = self._encryption.decrypt(agent.password)
+                result["password"] = self._encryption.decrypt(password)
             except:
-                result["password"] = agent.password
+                result["password"] = password
+        else:
+            result["password"] = None
         
         # Decripta token agent
         agent_token = getattr(agent, 'agent_token', None)
@@ -96,6 +105,8 @@ class AgentService:
                 result["agent_token"] = self._encryption.decrypt(agent_token)
             except:
                 result["agent_token"] = agent_token
+        else:
+            result["agent_token"] = None
         
         return result
     
