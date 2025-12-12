@@ -137,6 +137,62 @@ def migrate_database(db_path: str = "./data/dadude.db"):
             print("Aggiungo colonna dns_server a agent_assignments...")
             cursor.execute("ALTER TABLE agent_assignments ADD COLUMN dns_server VARCHAR(255)")
         
+        # Verifica se customer_id in agent_assignments accetta NULL (per auto-registrazione)
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_assignments'")
+        table_def = cursor.fetchone()
+        if table_def and 'customer_id' in table_def[0] and 'NOT NULL' in table_def[0]:
+            print("Ricreo tabella agent_assignments per permettere customer_id NULL (auto-registrazione)...")
+            
+            # 1. Rinomina tabella esistente
+            cursor.execute("ALTER TABLE agent_assignments RENAME TO agent_assignments_old")
+            
+            # 2. Crea nuova tabella con customer_id nullable
+            cursor.execute("""
+                CREATE TABLE agent_assignments (
+                    id VARCHAR(8) PRIMARY KEY,
+                    dude_agent_id VARCHAR(50),
+                    customer_id VARCHAR(8),
+                    name VARCHAR(100) NOT NULL,
+                    address VARCHAR(255) NOT NULL,
+                    port INTEGER DEFAULT 8728,
+                    status VARCHAR(20) DEFAULT 'unknown',
+                    last_seen DATETIME,
+                    version VARCHAR(50),
+                    location VARCHAR(255),
+                    site_name VARCHAR(100),
+                    username VARCHAR(255),
+                    password VARCHAR(255),
+                    use_ssl BOOLEAN DEFAULT 0,
+                    connection_type VARCHAR(20) DEFAULT 'api',
+                    ssh_port INTEGER DEFAULT 22,
+                    ssh_key TEXT,
+                    agent_type VARCHAR(20) DEFAULT 'mikrotik',
+                    agent_api_port INTEGER DEFAULT 8080,
+                    agent_token VARCHAR(255),
+                    agent_url VARCHAR(255),
+                    dns_server VARCHAR(255),
+                    default_scan_type VARCHAR(50) DEFAULT 'ping',
+                    auto_add_devices BOOLEAN DEFAULT 0,
+                    description TEXT,
+                    notes TEXT,
+                    active BOOLEAN DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (customer_id) REFERENCES customers(id)
+                )
+            """)
+            
+            # 3. Copia dati
+            cursor.execute("""
+                INSERT INTO agent_assignments 
+                SELECT * FROM agent_assignments_old
+            """)
+            
+            # 4. Elimina vecchia tabella
+            cursor.execute("DROP TABLE agent_assignments_old")
+            
+            print("Tabella agent_assignments ricreata con successo")
+        
         # Verifica colonne esistenti in credentials
         cursor.execute("PRAGMA table_info(credentials)")
         columns = [row[1] for row in cursor.fetchall()]

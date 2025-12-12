@@ -321,8 +321,8 @@ class AgentAssignment(Base):
     # Riferimento all'agent Dude (se esiste)
     dude_agent_id = Column(String(50), nullable=True, index=True)
     
-    # Cliente associato
-    customer_id = Column(String(8), ForeignKey("customers.id"), nullable=False)
+    # Cliente associato (nullable per agent in attesa di approvazione)
+    customer_id = Column(String(8), ForeignKey("customers.id"), nullable=True)
     
     # Info sonda
     name = Column(String(100), nullable=False)  # Nome descrittivo
