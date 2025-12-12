@@ -2741,8 +2741,11 @@ async function autoDetectDevice(deviceId, address) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 address: address,
-                use_default_credentials: true,
-                use_agent: true  // Usa agent se disponibile
+                device_id: deviceId,  // ID device per usare credenziali assegnate e salvare risultati
+                use_assigned_credential: true,  // Priorità a credenziale assegnata al device
+                use_default_credentials: true,  // Fallback a credenziali default
+                use_agent: true,  // Usa agent se disponibile
+                save_results: true  // Salva risultati nel device
             })
         });
         
@@ -2783,15 +2786,15 @@ async function autoDetectDevice(deviceId, address) {
                 message += `\nAgent usato: ${result.agent_used.name} (${result.agent_used.type})\n`;
             }
             
+            if (result.saved) {
+                message += `\n💾 Dati salvati nel dispositivo!\n`;
+            } else if (result.save_error) {
+                message += `\n⚠️ Errore salvataggio: ${result.save_error}\n`;
+            }
+            
             alert(message);
             
-            // Aggiorna dispositivo in inventario
-            await fetch(`/api/v1/inventory/devices/${deviceId}/identify`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ probe_result: sr })
-            });
-            
+            // Ricarica l'inventario per vedere i dati aggiornati
             loadInventory();
         } else {
             let errorMsg = '❌ Auto-Detect Fallito\n\n';
@@ -2806,10 +2809,15 @@ async function autoDetectDevice(deviceId, address) {
             if (result.credentials_tested && result.credentials_tested.length > 0) {
                 errorMsg += `\nCredenziali testate senza successo:\n`;
                 result.credentials_tested.forEach(c => {
-                    errorMsg += `  • ${c.name} (${c.type})\n`;
+                    const source = c.source === 'device_assigned' ? '[device]' : '[default]';
+                    errorMsg += `  • ${c.name} (${c.type}) ${source}\n`;
                 });
             } else {
-                errorMsg += `\n⚠️ Nessuna credenziale di default trovata.\nConfigura credenziali WMI/SSH/SNMP per questo cliente.`;
+                errorMsg += `\n⚠️ Nessuna credenziale trovata.\n`;
+                errorMsg += `Assicurati che:\n`;
+                errorMsg += `  1. Il device abbia una credenziale assegnata, oppure\n`;
+                errorMsg += `  2. Esistano credenziali globali/cliente di default per i tipi richiesti\n`;
+                errorMsg += `     (SSH/SNMP/WMI in base alle porte aperte)\n`;
             }
             
             alert(errorMsg);

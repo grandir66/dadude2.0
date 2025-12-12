@@ -62,9 +62,12 @@ class AutoDetectRequest(BaseModel):
     """Schema per auto-detect dispositivo con credenziali di default"""
     address: str
     mac_address: Optional[str] = None
+    device_id: Optional[str] = None  # ID device inventario (se presente, usa sua credenziale e salva risultati)
     use_default_credentials: bool = True  # Usa credenziali default del cliente
+    use_assigned_credential: bool = True  # Usa credenziale assegnata al device (prioritaria)
     use_agent: bool = True  # Usa agent remoto se disponibile
     agent_id: Optional[str] = None  # ID agent specifico (se None, usa default)
+    save_results: bool = True  # Salva i risultati nel device
 
 
 class BulkAutoDetectRequest(BaseModel):
@@ -248,7 +251,54 @@ async def auto_detect_device(
         
         # 2. Determina credenziali da provare
         credentials_list = []
+        device_record = None
         
+        # 2a. Prima controlla se c'è una credenziale assegnata al device specifico
+        if data.device_id and data.use_assigned_credential:
+            from ..models.inventory import InventoryDevice
+            from ..models.database import Credential as CredentialDB
+            
+            session = customer_service._get_session()
+            try:
+                device_record = session.query(InventoryDevice).filter(
+                    InventoryDevice.id == data.device_id
+                ).first()
+                
+                if device_record and device_record.credential_id:
+                    cred = session.query(CredentialDB).filter(
+                        CredentialDB.id == device_record.credential_id
+                    ).first()
+                    
+                    if cred:
+                        # Decripta la password
+                        encryption = customer_service._encryption
+                        password = encryption.decrypt(cred.password) if cred.password else None
+                        
+                        credentials_list.append({
+                            "id": cred.id,
+                            "name": cred.name,
+                            "type": cred.credential_type,
+                            "username": cred.username,
+                            "password": password,
+                            "ssh_port": cred.ssh_port or 22,
+                            "ssh_private_key": encryption.decrypt(cred.ssh_private_key) if cred.ssh_private_key else None,
+                            "snmp_community": cred.snmp_community,
+                            "snmp_version": cred.snmp_version or '2c',
+                            "snmp_port": cred.snmp_port or 161,
+                            "wmi_domain": cred.wmi_domain,
+                            "mikrotik_api_port": cred.mikrotik_api_port or 8728,
+                        })
+                        result["credentials_tested"].append({
+                            "id": cred.id,
+                            "name": cred.name,
+                            "type": cred.credential_type,
+                            "source": "device_assigned",
+                        })
+                        logger.info(f"Auto-detect: Using device-assigned credential '{cred.name}' ({cred.credential_type})")
+            finally:
+                session.close()
+        
+        # 2b. Poi aggiungi credenziali di default se richiesto
         if data.use_default_credentials:
             # Ottieni credenziali di default in base alle porte aperte
             creds = customer_service.get_credentials_for_auto_detect(
@@ -257,6 +307,10 @@ async def auto_detect_device(
             )
             
             for cred in creds:
+                # Skip se già presente (stessa credenziale assegnata)
+                if any(c["id"] == cred.id for c in credentials_list):
+                    continue
+                    
                 credentials_list.append({
                     "id": cred.id,
                     "name": cred.name,
@@ -275,6 +329,7 @@ async def auto_detect_device(
                     "id": cred.id,
                     "name": cred.name,
                     "type": cred.credential_type,
+                    "source": "default",
                 })
         
         logger.info(f"Auto-detect: Testing {len(credentials_list)} credentials on {data.address}")
@@ -321,6 +376,69 @@ async def auto_detect_device(
         result["identified"] = scan_result.get("identified_by") is not None
         
         logger.info(f"Auto-detect complete for {data.address}: identified={result['identified']}, method={scan_result.get('identified_by')}")
+        
+        # 4. Salva i risultati nel device se richiesto
+        if data.save_results and data.device_id and result["identified"]:
+            from ..models.inventory import InventoryDevice
+            import json
+            
+            session = customer_service._get_session()
+            try:
+                device = session.query(InventoryDevice).filter(
+                    InventoryDevice.id == data.device_id
+                ).first()
+                
+                if device:
+                    # Aggiorna campi dal risultato
+                    if scan_result.get("hostname"):
+                        device.hostname = scan_result["hostname"]
+                    if scan_result.get("os_family"):
+                        device.os_family = scan_result["os_family"]
+                    if scan_result.get("os_version"):
+                        device.os_version = scan_result["os_version"]
+                    if scan_result.get("manufacturer") or scan_result.get("vendor"):
+                        device.manufacturer = scan_result.get("manufacturer") or scan_result.get("vendor")
+                    if scan_result.get("model"):
+                        device.model = scan_result["model"]
+                    if scan_result.get("serial_number"):
+                        device.serial_number = scan_result["serial_number"]
+                    if scan_result.get("cpu_model"):
+                        device.cpu_model = scan_result["cpu_model"]
+                    if scan_result.get("cpu_cores"):
+                        device.cpu_cores = int(scan_result["cpu_cores"])
+                    if scan_result.get("ram_total_gb"):
+                        device.ram_total_gb = float(scan_result["ram_total_gb"])
+                    if scan_result.get("disk_total_gb"):
+                        device.disk_total_gb = float(scan_result["disk_total_gb"])
+                    if scan_result.get("firmware_version"):
+                        device.firmware_version = scan_result["firmware_version"]
+                    if scan_result.get("category"):
+                        device.category = scan_result["category"]
+                    
+                    # Metodo di identificazione
+                    device.identified_by = scan_result.get("identified_by")
+                    
+                    # Credenziale usata
+                    if result["credentials_tested"]:
+                        device.credential_used = result["credentials_tested"][0].get("type")
+                    
+                    # Porte aperte
+                    if open_ports:
+                        device.open_ports = json.dumps(open_ports) if isinstance(open_ports, list) else open_ports
+                    
+                    # Timestamp
+                    from datetime import datetime
+                    device.last_scan = datetime.utcnow()
+                    
+                    session.commit()
+                    logger.info(f"Auto-detect: Saved results to device {data.device_id}")
+                    result["saved"] = True
+            except Exception as save_err:
+                logger.error(f"Failed to save auto-detect results: {save_err}")
+                session.rollback()
+                result["save_error"] = str(save_err)
+            finally:
+                session.close()
         
     except Exception as e:
         logger.error(f"Auto-detect failed for {data.address}: {e}")
