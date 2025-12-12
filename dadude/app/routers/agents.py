@@ -340,6 +340,238 @@ async def list_pending_agents():
         session.close()
 
 
+# ==========================================
+# SERVER UPDATE SYSTEM
+# (MUST be before routes with path parameters)
+# ==========================================
+
+# Versione corrente del server
+SERVER_VERSION = "1.1.0"
+GITHUB_REPO = "grandir66/dadude"
+GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}"
+
+
+@router.get("/server/version")
+async def get_server_version():
+    """
+    Restituisce la versione corrente del server.
+    """
+    return {
+        "version": SERVER_VERSION,
+        "agent_version": AGENT_VERSION,
+        "repository": f"https://github.com/{GITHUB_REPO}",
+    }
+
+
+@router.get("/server/check-update")
+async def check_server_update():
+    """
+    Controlla se è disponibile una nuova versione del server su GitHub.
+    """
+    try:
+        import httpx
+        
+        async with httpx.AsyncClient(timeout=15) as client:
+            # Controlla l'ultimo tag/release
+            response = await client.get(
+                f"{GITHUB_API}/releases/latest",
+                headers={"Accept": "application/vnd.github.v3+json"}
+            )
+            
+            if response.status_code == 200:
+                release = response.json()
+                latest_version = release.get("tag_name", "").lstrip("v")
+                
+                needs_update = _compare_versions(SERVER_VERSION, latest_version) < 0
+                
+                return {
+                    "success": True,
+                    "current_version": SERVER_VERSION,
+                    "latest_version": latest_version,
+                    "needs_update": needs_update,
+                    "release_name": release.get("name"),
+                    "release_date": release.get("published_at"),
+                    "release_url": release.get("html_url"),
+                    "changelog": release.get("body", "")[:500],
+                }
+            elif response.status_code == 404:
+                # Nessuna release pubblicata, prova con i commit
+                commits_resp = await client.get(
+                    f"{GITHUB_API}/commits?per_page=1",
+                    headers={"Accept": "application/vnd.github.v3+json"}
+                )
+                
+                if commits_resp.status_code == 200:
+                    commits = commits_resp.json()
+                    if commits:
+                        latest_commit = commits[0]
+                        return {
+                            "success": True,
+                            "current_version": SERVER_VERSION,
+                            "latest_version": "dev",
+                            "needs_update": True,
+                            "release_name": "Latest commit",
+                            "release_date": latest_commit.get("commit", {}).get("author", {}).get("date"),
+                            "release_url": latest_commit.get("html_url"),
+                            "changelog": latest_commit.get("commit", {}).get("message", "")[:500],
+                            "commit_sha": latest_commit.get("sha", "")[:8],
+                        }
+                
+                return {
+                    "success": False,
+                    "current_version": SERVER_VERSION,
+                    "error": "No releases or commits found",
+                }
+            else:
+                return {
+                    "success": False,
+                    "current_version": SERVER_VERSION,
+                    "error": f"GitHub API error: {response.status_code}",
+                }
+                
+    except Exception as e:
+        logger.error(f"Failed to check server update: {e}")
+        return {
+            "success": False,
+            "current_version": SERVER_VERSION,
+            "error": str(e),
+        }
+
+
+@router.get("/server/commits")
+async def get_recent_commits():
+    """
+    Ottiene gli ultimi commit dal repository GitHub.
+    """
+    try:
+        import httpx
+        
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                f"{GITHUB_API}/commits?per_page=10",
+                headers={"Accept": "application/vnd.github.v3+json"}
+            )
+            
+            if response.status_code == 200:
+                commits = response.json()
+                return {
+                    "success": True,
+                    "commits": [
+                        {
+                            "sha": c.get("sha", "")[:8],
+                            "message": c.get("commit", {}).get("message", "").split("\n")[0],
+                            "author": c.get("commit", {}).get("author", {}).get("name"),
+                            "date": c.get("commit", {}).get("author", {}).get("date"),
+                            "url": c.get("html_url"),
+                        }
+                        for c in commits
+                    ]
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"GitHub API error: {response.status_code}",
+                }
+                
+    except Exception as e:
+        logger.error(f"Failed to get commits: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+@router.post("/server/update")
+async def trigger_server_update():
+    """
+    Avvia l'aggiornamento del server (git pull).
+    NOTA: Richiede riavvio manuale del server dopo l'update.
+    """
+    import subprocess
+    import os
+    
+    # Determina la directory del progetto
+    project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+    try:
+        result = subprocess.run(
+            ["git", "pull", "--rebase"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if result.returncode == 0:
+            output = result.stdout
+            already_up_to_date = "Already up to date" in output or "Già aggiornato" in output
+            
+            return {
+                "success": True,
+                "already_up_to_date": already_up_to_date,
+                "message": "Update completed" if not already_up_to_date else "Already up to date",
+                "output": output,
+                "needs_restart": not already_up_to_date,
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.stderr or "Git pull failed",
+                "output": result.stdout,
+            }
+            
+    except subprocess.TimeoutExpired:
+        return {
+            "success": False,
+            "error": "Update timed out",
+        }
+    except Exception as e:
+        logger.error(f"Failed to update server: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+@router.post("/server/restart")
+async def trigger_server_restart():
+    """
+    Riavvia il server.
+    Per Docker: restarta il container.
+    Per processo diretto: esegue reload.
+    """
+    import os
+    
+    try:
+        in_docker = os.path.exists("/.dockerenv")
+        
+        if in_docker:
+            return {
+                "success": True,
+                "message": "Server is running in Docker. Please restart the container manually.",
+                "command": "docker restart dadude-server",
+            }
+        else:
+            import signal
+            os.kill(os.getpid(), signal.SIGHUP)
+            
+            return {
+                "success": True,
+                "message": "Restart signal sent",
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to restart server: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+# ==========================================
+# AGENT-SPECIFIC ROUTES (with path parameters)
+# ==========================================
+
 @router.post("/{agent_db_id}/approve")
 async def approve_agent(
     agent_db_id: str,
@@ -786,237 +1018,4 @@ def _compare_versions(v1: str, v2: str) -> int:
         if a > b:
             return 1
     return 0
-
-
-# ==========================================
-# SERVER UPDATE SYSTEM
-# ==========================================
-
-# Versione corrente del server
-SERVER_VERSION = "1.1.0"
-GITHUB_REPO = "grandir66/dadude"
-GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}"
-
-
-@router.get("/server/version")
-async def get_server_version():
-    """
-    Restituisce la versione corrente del server.
-    """
-    return {
-        "version": SERVER_VERSION,
-        "agent_version": AGENT_VERSION,
-        "repository": f"https://github.com/{GITHUB_REPO}",
-    }
-
-
-@router.get("/server/check-update")
-async def check_server_update():
-    """
-    Controlla se è disponibile una nuova versione del server su GitHub.
-    """
-    try:
-        import httpx
-        
-        async with httpx.AsyncClient(timeout=15) as client:
-            # Controlla l'ultimo tag/release
-            response = await client.get(
-                f"{GITHUB_API}/releases/latest",
-                headers={"Accept": "application/vnd.github.v3+json"}
-            )
-            
-            if response.status_code == 200:
-                release = response.json()
-                latest_version = release.get("tag_name", "").lstrip("v")
-                
-                needs_update = _compare_versions(SERVER_VERSION, latest_version) < 0
-                
-                return {
-                    "success": True,
-                    "current_version": SERVER_VERSION,
-                    "latest_version": latest_version,
-                    "needs_update": needs_update,
-                    "release_name": release.get("name"),
-                    "release_date": release.get("published_at"),
-                    "release_url": release.get("html_url"),
-                    "changelog": release.get("body", "")[:500],  # Primi 500 caratteri
-                }
-            elif response.status_code == 404:
-                # Nessuna release pubblicata, prova con i commit
-                commits_resp = await client.get(
-                    f"{GITHUB_API}/commits?per_page=1",
-                    headers={"Accept": "application/vnd.github.v3+json"}
-                )
-                
-                if commits_resp.status_code == 200:
-                    commits = commits_resp.json()
-                    if commits:
-                        latest_commit = commits[0]
-                        return {
-                            "success": True,
-                            "current_version": SERVER_VERSION,
-                            "latest_version": "dev",
-                            "needs_update": True,  # Sempre disponibile update da commit
-                            "release_name": "Latest commit",
-                            "release_date": latest_commit.get("commit", {}).get("author", {}).get("date"),
-                            "release_url": latest_commit.get("html_url"),
-                            "changelog": latest_commit.get("commit", {}).get("message", "")[:500],
-                            "commit_sha": latest_commit.get("sha", "")[:8],
-                        }
-                
-                return {
-                    "success": False,
-                    "current_version": SERVER_VERSION,
-                    "error": "No releases or commits found",
-                }
-            else:
-                return {
-                    "success": False,
-                    "current_version": SERVER_VERSION,
-                    "error": f"GitHub API error: {response.status_code}",
-                }
-                
-    except Exception as e:
-        logger.error(f"Failed to check server update: {e}")
-        return {
-            "success": False,
-            "current_version": SERVER_VERSION,
-            "error": str(e),
-        }
-
-
-@router.get("/server/commits")
-async def get_recent_commits():
-    """
-    Ottiene gli ultimi commit dal repository GitHub.
-    """
-    try:
-        import httpx
-        
-        async with httpx.AsyncClient(timeout=15) as client:
-            response = await client.get(
-                f"{GITHUB_API}/commits?per_page=10",
-                headers={"Accept": "application/vnd.github.v3+json"}
-            )
-            
-            if response.status_code == 200:
-                commits = response.json()
-                return {
-                    "success": True,
-                    "commits": [
-                        {
-                            "sha": c.get("sha", "")[:8],
-                            "message": c.get("commit", {}).get("message", "").split("\n")[0],
-                            "author": c.get("commit", {}).get("author", {}).get("name"),
-                            "date": c.get("commit", {}).get("author", {}).get("date"),
-                            "url": c.get("html_url"),
-                        }
-                        for c in commits
-                    ]
-                }
-            else:
-                return {
-                    "success": False,
-                    "error": f"GitHub API error: {response.status_code}",
-                }
-                
-    except Exception as e:
-        logger.error(f"Failed to get commits: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-        }
-
-
-@router.post("/server/update")
-async def trigger_server_update():
-    """
-    Avvia l'aggiornamento del server (git pull).
-    NOTA: Richiede riavvio manuale del server dopo l'update.
-    """
-    import subprocess
-    import os
-    
-    # Determina la directory del progetto
-    project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    
-    try:
-        # Esegui git pull
-        result = subprocess.run(
-            ["git", "pull", "--rebase"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-            timeout=60
-        )
-        
-        if result.returncode == 0:
-            # Verifica se ci sono stati cambiamenti
-            output = result.stdout
-            already_up_to_date = "Already up to date" in output or "Già aggiornato" in output
-            
-            return {
-                "success": True,
-                "already_up_to_date": already_up_to_date,
-                "message": "Update completed" if not already_up_to_date else "Already up to date",
-                "output": output,
-                "needs_restart": not already_up_to_date,
-            }
-        else:
-            return {
-                "success": False,
-                "error": result.stderr or "Git pull failed",
-                "output": result.stdout,
-            }
-            
-    except subprocess.TimeoutExpired:
-        return {
-            "success": False,
-            "error": "Update timed out",
-        }
-    except Exception as e:
-        logger.error(f"Failed to update server: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-        }
-
-
-@router.post("/server/restart")
-async def trigger_server_restart():
-    """
-    Riavvia il server.
-    Per Docker: restarta il container.
-    Per processo diretto: esegue reload.
-    """
-    import subprocess
-    import os
-    
-    try:
-        # Verifica se siamo in Docker
-        in_docker = os.path.exists("/.dockerenv")
-        
-        if in_docker:
-            # In Docker, segnala che serve restart esterno
-            return {
-                "success": True,
-                "message": "Server is running in Docker. Please restart the container manually.",
-                "command": "docker restart dadude-server",
-            }
-        else:
-            # Invia SIGHUP per reload graceful (se supportato)
-            import signal
-            os.kill(os.getpid(), signal.SIGHUP)
-            
-            return {
-                "success": True,
-                "message": "Restart signal sent",
-            }
-            
-    except Exception as e:
-        logger.error(f"Failed to restart server: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-        }
 
