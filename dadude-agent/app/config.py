@@ -3,9 +3,10 @@ DaDude Agent - Configuration
 """
 import os
 import json
-from typing import Optional, List
+from typing import Optional, List, Union, Any
 from functools import lru_cache
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -22,7 +23,7 @@ class Settings(BaseSettings):
     # Polling
     poll_interval: int = 60  # seconds
     
-    # DNS
+    # DNS - accetta stringa singola, lista separata da virgole, o JSON array
     dns_servers: List[str] = ["8.8.8.8", "1.1.1.1"]
     
     # API
@@ -30,6 +31,26 @@ class Settings(BaseSettings):
     
     # Logging
     log_level: str = "INFO"
+    
+    @field_validator('dns_servers', mode='before')
+    @classmethod
+    def parse_dns_servers(cls, v: Any) -> List[str]:
+        """Converte dns_servers da vari formati a lista"""
+        if v is None:
+            return ["8.8.8.8", "1.1.1.1"]
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            # Prova prima come JSON
+            v = v.strip()
+            if v.startswith('['):
+                try:
+                    return json.loads(v)
+                except:
+                    pass
+            # Altrimenti splitta per virgola
+            return [s.strip() for s in v.split(',') if s.strip()]
+        return ["8.8.8.8"]
     
     class Config:
         env_prefix = "DADUDE_"
