@@ -1057,15 +1057,15 @@ async def scan_customer_networks(
             if network.dns_secondary:
                 dns_servers.append(network.dns_secondary)
             
-            # Crea oggetto MikroTikAgent per operazioni remote
+            # Crea oggetto MikroTikAgent per operazioni remote (solo per agent MikroTik)
             mikrotik_agent = None
-            if agent and agent.address and agent.username:
+            if agent_type == "mikrotik" and agent and agent.address and agent.username:
                 mikrotik_agent = MikroTikAgent(
                     address=agent.address,
                     username=agent.username,
                     password=agent.password or "",
                     port=agent.ssh_port or 22,
-                    api_port=agent.api_port or 8728,
+                    api_port=agent.port or 8728,
                     use_ssl=agent.use_ssl or False,
                     dns_server=dns_servers[0] if dns_servers else None,
                 )

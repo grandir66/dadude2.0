@@ -8,7 +8,7 @@ LABEL maintainer="DaDude Team"
 LABEL description="Network scanning agent for DaDude inventory system"
 LABEL version="1.0.0"
 
-# Install system dependencies + network tools
+# Install system dependencies + network tools + nmap
 RUN apk add --no-cache \
     gcc \
     musl-dev \
@@ -19,6 +19,8 @@ RUN apk add --no-cache \
     bind-tools \
     net-tools \
     iproute2 \
+    nmap \
+    nmap-scripts \
     && rm -rf /var/cache/apk/*
 
 # Create app directory

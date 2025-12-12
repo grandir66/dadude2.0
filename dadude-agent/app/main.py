@@ -320,153 +320,111 @@ async def scan_network(
     authorized: bool = Depends(verify_token)
 ):
     """
-    Scansiona una rete per trovare host attivi.
-    Combina ping, port scan e ARP per massima rilevazione.
+    Scansiona una rete per trovare host attivi usando nmap.
+    Nmap è molto più veloce e affidabile, ottiene anche MAC address via ARP.
     """
-    import ipaddress
-    import subprocess
     import asyncio
-    import socket
+    import re
+    import xml.etree.ElementTree as ET
     
     start_time = datetime.now()
     
-    # Porte da scansionare per rilevare host anche senza ping
-    COMMON_PORTS = [22, 80, 443, 445, 139, 3389, 8080, 8443, 161, 21, 23, 25, 53, 110, 143, 993, 995, 8728, 8729]
-    
     try:
-        network = ipaddress.ip_network(request.network, strict=False)
-        hosts = list(network.hosts())
+        logger.info(f"[NMAP] Scanning network {request.network}")
         
-        # Limita a max 256 host per evitare timeout
-        if len(hosts) > 256:
-            hosts = hosts[:256]
+        # Usa nmap con:
+        # -sn: Ping scan (no port scan per velocità)
+        # -PR: ARP ping (ottiene MAC address)
+        # -oX -: Output XML a stdout
+        # --min-rate 500: Velocità minima pacchetti
+        # -T4: Timing aggressivo
+        proc = await asyncio.create_subprocess_exec(
+            "nmap", "-sn", "-PR", "-oX", "-", 
+            "--min-rate", "300", "-T4",
+            request.network,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
         
-        logger.info(f"Scanning network {request.network} ({len(hosts)} hosts) - ping + port scan")
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
         
-        found_hosts = {}  # IP -> info
+        if proc.returncode != 0:
+            error_msg = stderr.decode().strip() if stderr else "Unknown nmap error"
+            logger.error(f"[NMAP] Failed: {error_msg}")
+            return {
+                "success": False,
+                "network": request.network,
+                "error": f"nmap failed: {error_msg}",
+            }
         
-        async def check_host(ip: str) -> Optional[Dict]:
-            """Controlla host via ping e porte comuni"""
-            ip_str = str(ip)
-            result = {"address": ip_str, "alive": False, "open_ports": [], "mac_address": None}
-            
-            # 1. Prova ping
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "ping", "-c", "1", "-W", "1", ip_str,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                await asyncio.wait_for(proc.wait(), timeout=2)
-                if proc.returncode == 0:
-                    result["alive"] = True
-            except:
-                pass
-            
-            # 2. Prova porte comuni (solo se ping fallisce, per velocità)
-            if not result["alive"]:
-                for port in [80, 443, 22]:  # Solo 3 porte critiche
-                    try:
-                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        sock.settimeout(0.2)  # Timeout breve
-                        if sock.connect_ex((ip_str, port)) == 0:
-                            result["alive"] = True
-                            result["open_ports"].append(port)
-                            sock.close()
-                            break  # Trovato, non serve continuare
-                        sock.close()
-                    except:
-                        pass
-            
-            if result["alive"]:
-                # 3. Ottieni MAC dalla tabella ARP (prova più metodi)
-                mac = None
-                
-                # Metodo 1: ip neigh
-                try:
-                    proc = await asyncio.create_subprocess_exec(
-                        "ip", "neigh", "show", ip_str,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.DEVNULL,
-                    )
-                    stdout, _ = await proc.communicate()
-                    output = stdout.decode().strip()
-                    if "lladdr" in output:
-                        parts = output.split()
-                        for i, p in enumerate(parts):
-                            if p == "lladdr" and i + 1 < len(parts):
-                                mac = parts[i + 1].upper()
-                                break
-                except:
-                    pass
-                
-                # Metodo 2: arp -n (fallback)
-                if not mac:
-                    try:
-                        proc = await asyncio.create_subprocess_exec(
-                            "arp", "-n", ip_str,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.DEVNULL,
-                        )
-                        stdout, _ = await proc.communicate()
-                        output = stdout.decode().strip()
-                        # Cerca pattern MAC xx:xx:xx:xx:xx:xx
-                        import re
-                        mac_match = re.search(r'([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}', output)
-                        if mac_match:
-                            mac = mac_match.group(0).upper().replace('-', ':')
-                    except:
-                        pass
-                
-                # Metodo 3: /proc/net/arp
-                if not mac:
-                    try:
-                        with open('/proc/net/arp', 'r') as f:
-                            for line in f:
-                                if ip_str in line:
-                                    parts = line.split()
-                                    if len(parts) >= 4:
-                                        mac = parts[3].upper()
-                                        if mac != "00:00:00:00:00:00":
-                                            break
-                                        else:
-                                            mac = None
-                    except:
-                        pass
-                
-                result["mac_address"] = mac
-                return result
-            return None
-        
-        # Esegui in parallelo (max 100 alla volta per velocità)
-        batch_size = 100
+        # Parse XML output
         results = []
-        for i in range(0, len(hosts), batch_size):
-            batch = hosts[i:i+batch_size]
-            tasks = [check_host(str(ip)) for ip in batch]
-            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-            for r in batch_results:
-                if isinstance(r, dict) and r:
-                    results.append(r)
+        try:
+            root = ET.fromstring(stdout.decode())
             
-            # Log progresso ogni batch
-            logger.info(f"Scanned {min(i+batch_size, len(hosts))}/{len(hosts)} hosts, found {len(results)} so far")
+            for host in root.findall('.//host'):
+                status = host.find('status')
+                if status is not None and status.get('state') == 'up':
+                    device = {"alive": True, "open_ports": []}
+                    
+                    # IP address
+                    for addr in host.findall('address'):
+                        if addr.get('addrtype') == 'ipv4':
+                            device['address'] = addr.get('addr')
+                        elif addr.get('addrtype') == 'mac':
+                            device['mac_address'] = addr.get('addr', '').upper()
+                            # Vendor from nmap
+                            vendor = addr.get('vendor')
+                            if vendor:
+                                device['vendor'] = vendor
+                    
+                    # Hostname
+                    hostnames = host.find('hostnames')
+                    if hostnames is not None:
+                        hostname_elem = hostnames.find('hostname')
+                        if hostname_elem is not None:
+                            device['hostname'] = hostname_elem.get('name')
+                    
+                    if device.get('address'):
+                        results.append(device)
+                        
+        except ET.ParseError as e:
+            logger.error(f"[NMAP] XML parse error: {e}")
+            # Fallback: parse text output
+            output = stdout.decode()
+            for line in output.split('\n'):
+                if 'Nmap scan report for' in line:
+                    ip_match = re.search(r'(\d+\.\d+\.\d+\.\d+)', line)
+                    if ip_match:
+                        results.append({
+                            "address": ip_match.group(1),
+                            "alive": True,
+                            "mac_address": None,
+                            "open_ports": []
+                        })
         
         duration = int((datetime.now() - start_time).total_seconds() * 1000)
         
-        logger.info(f"Network scan completed: {len(results)}/{len(hosts)} hosts found in {duration}ms")
+        logger.info(f"[NMAP] Scan completed: {len(results)} hosts found in {duration}ms")
         
         return {
             "success": True,
             "network": request.network,
-            "scan_type": request.scan_type,
+            "scan_type": "nmap",
             "devices_found": len(results),
             "results": results,
             "duration_ms": duration,
         }
         
+    except asyncio.TimeoutError:
+        logger.error(f"[NMAP] Timeout scanning {request.network}")
+        return {
+            "success": False,
+            "network": request.network,
+            "error": "Scan timeout (120s)",
+        }
     except Exception as e:
-        logger.error(f"Network scan failed for {request.network}: {e}")
+        logger.error(f"[NMAP] Network scan failed: {e}")
         return {
             "success": False,
             "network": request.network,
