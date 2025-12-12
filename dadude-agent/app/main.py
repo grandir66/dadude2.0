@@ -363,17 +363,20 @@ async def scan_network(
             except:
                 pass
             
-            # 2. Prova porte comuni (anche se ping fallisce)
-            for port in COMMON_PORTS[:5]:  # Solo prime 5 porte per velocità
-                try:
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(0.5)
-                    if sock.connect_ex((ip_str, port)) == 0:
-                        result["alive"] = True
-                        result["open_ports"].append(port)
-                    sock.close()
-                except:
-                    pass
+            # 2. Prova porte comuni (solo se ping fallisce, per velocità)
+            if not result["alive"]:
+                for port in [80, 443, 22]:  # Solo 3 porte critiche
+                    try:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(0.2)  # Timeout breve
+                        if sock.connect_ex((ip_str, port)) == 0:
+                            result["alive"] = True
+                            result["open_ports"].append(port)
+                            sock.close()
+                            break  # Trovato, non serve continuare
+                        sock.close()
+                    except:
+                        pass
             
             if result["alive"]:
                 # 3. Ottieni MAC dalla tabella ARP (prova più metodi)
@@ -435,18 +438,19 @@ async def scan_network(
                 return result
             return None
         
-        # Esegui in parallelo (max 30 alla volta per non sovraccaricare)
-        batch_size = 30
+        # Esegui in parallelo (max 100 alla volta per velocità)
+        batch_size = 100
         results = []
         for i in range(0, len(hosts), batch_size):
             batch = hosts[i:i+batch_size]
             tasks = [check_host(str(ip)) for ip in batch]
-            batch_results = await asyncio.gather(*tasks)
-            results.extend([r for r in batch_results if r])
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+            for r in batch_results:
+                if isinstance(r, dict) and r:
+                    results.append(r)
             
-            # Log progresso
-            if i % 100 == 0 and i > 0:
-                logger.info(f"Scanned {i}/{len(hosts)} hosts, found {len(results)} so far")
+            # Log progresso ogni batch
+            logger.info(f"Scanned {min(i+batch_size, len(hosts))}/{len(hosts)} hosts, found {len(results)} so far")
         
         duration = int((datetime.now() - start_time).total_seconds() * 1000)
         

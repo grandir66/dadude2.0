@@ -15,7 +15,7 @@ class AgentConfig:
     agent_id: str
     agent_url: str  # es: http://192.168.1.254:8080
     agent_token: str
-    timeout: int = 30
+    timeout: int = 300  # 5 minuti per network scan
 
 
 class AgentClient:

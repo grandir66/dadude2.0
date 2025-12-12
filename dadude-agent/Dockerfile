@@ -8,13 +8,17 @@ LABEL maintainer="DaDude Team"
 LABEL description="Network scanning agent for DaDude inventory system"
 LABEL version="1.0.0"
 
-# Install system dependencies
+# Install system dependencies + network tools
 RUN apk add --no-cache \
     gcc \
     musl-dev \
     libffi-dev \
     openssl-dev \
     cargo \
+    iputils \
+    bind-tools \
+    net-tools \
+    iproute2 \
     && rm -rf /var/cache/apk/*
 
 # Create app directory
@@ -34,9 +38,8 @@ RUN apk del gcc musl-dev libffi-dev openssl-dev cargo
 COPY app/ ./app/
 COPY config/ ./config/
 
-# Create non-root user
-RUN adduser -D -u 1000 agent
-USER agent
+# Run as root for network operations (ping, ARP, etc.)
+# In production, consider using capabilities instead
 
 # Expose API port
 EXPOSE 8080

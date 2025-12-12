@@ -936,19 +936,21 @@ async def scan_customer_networks(
         logger.info(f"Docker agent config: url={agent_url}, token={'***' if agent_token else 'MISSING'}")
         
         # Cerca un MikroTik agent per questo cliente (per ARP scan)
-        all_agents = service.list_agents(customer_id=agent.customer_id, active_only=True, include_password=True)
+        # Nota: list_agents non restituisce password, dobbiamo usare get_agent per ogni MikroTik
+        all_agents = service.list_agents(customer_id=agent.customer_id, active_only=True)
         mikrotik_agent = None
         for ag in all_agents:
             ag_type = getattr(ag, 'agent_type', 'mikrotik') or 'mikrotik'
             if ag_type == 'mikrotik' and ag.id != agent_id:
-                mikrotik_agent = ag
+                # Ottieni l'agent con password
+                mikrotik_agent = service.get_agent(ag.id, include_password=True)
                 break
         
         scan_result = None
         
         if mikrotik_agent:
             # OPZIONE B: Usa MikroTik per ARP scan (ottiene MAC address)
-            logger.info(f"Using MikroTik {mikrotik_agent.name} ({mikrotik_agent.address}) for ARP scan")
+            logger.info(f"[SCAN VIA MIKROTIK] Using {mikrotik_agent.name} ({mikrotik_agent.address}) for ARP scan on {network.ip_network}")
             try:
                 if mikrotik_agent.connection_type in ["api", "both"]:
                     scan_result = scanner.scan_network_via_router(
@@ -969,14 +971,14 @@ async def scan_customer_networks(
                         network=network.ip_network,
                         ssh_key=mikrotik_agent.ssh_key,
                     )
-                logger.info(f"MikroTik ARP scan found {scan_result.get('devices_found', 0)} devices")
+                logger.info(f"[SCAN VIA MIKROTIK] ARP scan completed: {scan_result.get('devices_found', 0)} devices found")
             except Exception as e:
-                logger.warning(f"MikroTik ARP scan failed, falling back to Docker agent: {e}")
+                logger.warning(f"[SCAN VIA MIKROTIK] ARP scan FAILED, falling back to Docker agent: {e}")
                 scan_result = None
         
         if not scan_result or not scan_result.get("success"):
             # OPZIONE C: Nessun MikroTik o fallback - usa Docker agent con ARP attivo
-            logger.info(f"Using Docker agent for network scan (no MikroTik or fallback)")
+            logger.info(f"[SCAN VIA DOCKER AGENT] Using {agent.address}:{agent.agent_api_port} for network scan on {network.ip_network}")
             agent_config = AgentConfig(
                 agent_id=agent.id,
                 agent_url=agent_url,
@@ -987,7 +989,7 @@ async def scan_customer_networks(
             try:
                 logger.info(f"Starting network scan via Docker agent: network={network.ip_network}")
                 scan_result = await agent_client.scan_network(network.ip_network, scan_type=scan_type)
-                logger.info(f"Docker agent scan result: {scan_result.get('devices_found', 0)} devices")
+                logger.info(f"[SCAN VIA DOCKER AGENT] Scan completed: {scan_result.get('devices_found', 0)} devices found")
             except Exception as e:
                 logger.error(f"Docker agent scan failed: {e}", exc_info=True)
                 raise HTTPException(status_code=500, detail=f"Errore scansione Docker agent: {e}")
@@ -996,6 +998,7 @@ async def scan_customer_networks(
     
     # MikroTik agent - Usa API o SSH in base al tipo di connessione
     elif agent.connection_type in ["api", "both"]:
+        logger.info(f"[SCAN VIA MIKROTIK API] Using {agent.name} ({agent.address}:{agent.port}) for scan on {network.ip_network}")
         scan_result = scanner.scan_network_via_router(
             router_address=agent.address,
             router_port=agent.port,
@@ -1006,6 +1009,7 @@ async def scan_customer_networks(
             use_ssl=agent.use_ssl,
         )
     elif agent.connection_type == "ssh":
+        logger.info(f"[SCAN VIA MIKROTIK SSH] Using {agent.name} ({agent.address}:{agent.ssh_port}) for scan on {network.ip_network}")
         scan_result = scanner.scan_network_via_ssh(
             router_address=agent.address,
             ssh_port=agent.ssh_port,
