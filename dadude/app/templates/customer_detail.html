@@ -1426,6 +1426,21 @@ document.getElementById('editCredentialForm').addEventListener('submit', async (
 <script>
 const customerId = '{{ customer.id }}';
 
+// Helper per parsare open_ports (può essere stringa JSON o array)
+function parseOpenPorts(openPorts) {
+    if (!openPorts) return [];
+    if (Array.isArray(openPorts)) return openPorts;
+    if (typeof openPorts === 'string') {
+        try {
+            const parsed = JSON.parse(openPorts);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            return [];
+        }
+    }
+    return [];
+}
+
 // Form Nuova Rete
 document.getElementById('newNetworkForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1627,8 +1642,9 @@ async function autoDetectWithAgent(agentId) {
             msg += `Model: ${sr.model || 'N/A'}\n`;
             msg += `Identificato via: ${sr.identified_by || 'N/A'}\n`;
             
-            if (result.open_ports && result.open_ports.length > 0) {
-                const openPorts = result.open_ports.filter(p => p.open).map(p => p.port);
+            const parsedPorts = parseOpenPorts(result.open_ports);
+            if (parsedPorts.length > 0) {
+                const openPorts = parsedPorts.filter(p => p.open).map(p => p.port);
                 msg += `\nPorte aperte: ${openPorts.join(', ')}\n`;
             }
             
@@ -2144,8 +2160,9 @@ function renderDiscoveryResults() {
 
         // Servizi aperti (porte)
         let servicesDisplay = '<span class="text-muted small">-</span>';
-        if (dev.open_ports && Array.isArray(dev.open_ports) && dev.open_ports.length > 0) {
-            const openServices = dev.open_ports.filter(p => p.open);
+        const devOpenPorts = parseOpenPorts(dev.open_ports);
+        if (devOpenPorts.length > 0) {
+            const openServices = devOpenPorts.filter(p => p.open);
             if (openServices.length > 0) {
                 const serviceList = openServices.slice(0, 5).map(s =>
                     `<span class="badge bg-info" title="Port ${s.port}/${s.protocol || 'tcp'}">${s.service || s.port}</span>`
@@ -2434,8 +2451,9 @@ async function loadInventory() {
 
                 // Servizi aperti
                 let servicesDisplay = '<span class="text-muted small">-</span>';
-                if (dev.open_ports && Array.isArray(dev.open_ports) && dev.open_ports.length > 0) {
-                    const openServices = dev.open_ports.filter(p => p.open);
+                const devPorts = parseOpenPorts(dev.open_ports);
+                if (devPorts.length > 0) {
+                    const openServices = devPorts.filter(p => p.open);
                     if (openServices.length > 0) {
                         const serviceList = openServices.slice(0, 5).map(s =>
                             `<span class="badge bg-info" title="Port ${s.port}">${s.service}</span>`
@@ -2486,8 +2504,9 @@ async function loadInventory() {
                 `;
                 
                 // Debug: log dei dati del device
-                if (dev.open_ports && dev.open_ports.length > 0) {
-                    console.log(`Device ${dev.name} (${dev.primary_ip}): ${dev.open_ports.filter(p => p.open).length} porte aperte`);
+                const debugPorts = parseOpenPorts(dev.open_ports);
+                if (debugPorts.length > 0) {
+                    console.log(`Device ${dev.name} (${dev.primary_ip}): ${debugPorts.filter(p => p.open).length} porte aperte`);
                 }
                 if (dev.hostname) {
                     console.log(`Device ${dev.name}: hostname = ${dev.hostname}`);
@@ -2656,7 +2675,7 @@ async function scanPorts(deviceId, ip) {
         const result = await response.json();
         
         if (result.success) {
-            const openPorts = result.open_ports.filter(p => p.open);
+            const openPorts = parseOpenPorts(result.open_ports).filter(p => p.open);
             let message = `✅ Scansione Porte Completata\n\n`;
             message += `📍 IP: ${ip}\n`;
             message += `🔌 Porte Aperte: ${result.open_count}\n\n`;
@@ -2777,8 +2796,9 @@ async function autoDetectDevice(deviceId, address) {
                 });
             }
             
-            if (result.open_ports && result.open_ports.length > 0) {
-                const openPorts = result.open_ports.filter(p => p.open).map(p => p.port);
+            const resultPorts = parseOpenPorts(result.open_ports);
+            if (resultPorts.length > 0) {
+                const openPorts = resultPorts.filter(p => p.open).map(p => p.port);
                 message += `\nPorte aperte: ${openPorts.join(', ')}\n`;
             }
             
@@ -2801,8 +2821,9 @@ async function autoDetectDevice(deviceId, address) {
             errorMsg += `Indirizzo: ${address}\n`;
             errorMsg += `Errore: ${result.error || 'Nessuna informazione ottenuta'}\n`;
             
-            if (result.open_ports && result.open_ports.length > 0) {
-                const openPorts = result.open_ports.filter(p => p.open).map(p => p.port);
+            const errorPorts = parseOpenPorts(result.open_ports);
+            if (errorPorts.length > 0) {
+                const openPorts = errorPorts.filter(p => p.open).map(p => p.port);
                 errorMsg += `\nPorte aperte rilevate: ${openPorts.join(', ')}\n`;
             }
             
