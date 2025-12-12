@@ -1,0 +1,481 @@
+"""
+DaDude - Agents Router
+API endpoints per registrazione e gestione dinamica degli agent
+"""
+from fastapi import APIRouter, HTTPException, Query, Header, Request
+from typing import Optional, List
+from pydantic import BaseModel
+from datetime import datetime
+from loguru import logger
+
+from ..services.customer_service import get_customer_service
+from ..services.encryption_service import get_encryption_service
+
+router = APIRouter(prefix="/agents", tags=["Agents"])
+
+
+# ==========================================
+# SCHEMAS
+# ==========================================
+
+class AgentRegistration(BaseModel):
+    """Schema per auto-registrazione agent"""
+    agent_id: str  # ID univoco dell'agent
+    agent_name: str
+    agent_type: str = "docker"  # docker, mikrotik
+    version: str = "1.0.0"
+    
+    # Info rete rilevate dall'agent
+    detected_ip: Optional[str] = None
+    detected_hostname: Optional[str] = None
+    
+    # Capacità
+    capabilities: Optional[List[str]] = None  # ["ssh", "snmp", "wmi", "nmap", "dns"]
+    
+    # Info sistema
+    os_info: Optional[str] = None
+    python_version: Optional[str] = None
+
+
+class AgentHeartbeat(BaseModel):
+    """Schema per heartbeat agent"""
+    agent_id: str
+    status: str = "online"
+    version: Optional[str] = None
+    detected_ip: Optional[str] = None
+    uptime_seconds: Optional[int] = None
+    last_scan_count: Optional[int] = None  # Numero scan eseguiti dall'ultimo heartbeat
+
+
+class AgentConfigResponse(BaseModel):
+    """Configurazione inviata dal server all'agent"""
+    agent_id: str
+    agent_name: str
+    
+    # Configurazione polling
+    poll_interval: int = 60  # Secondi tra un poll e l'altro
+    
+    # DNS da usare per scansioni
+    dns_servers: List[str] = ["8.8.8.8", "1.1.1.1"]
+    
+    # Range di porte da scansionare
+    default_ports: List[int] = [22, 23, 80, 443, 161, 445, 3389, 8728]
+    
+    # Credenziali (opzionale, per scan automatici)
+    # Non inviamo password in chiaro, solo riferimento
+    credential_ids: List[str] = []
+    
+    # Reti assegnate all'agent
+    assigned_networks: List[dict] = []
+    
+    # Ultimo aggiornamento config
+    config_version: int = 1
+    updated_at: Optional[str] = None
+
+
+class AgentUpdateRequest(BaseModel):
+    """Richiesta di aggiornamento configurazione agent dal server"""
+    name: Optional[str] = None
+    address: Optional[str] = None
+    dns_servers: Optional[List[str]] = None
+    poll_interval: Optional[int] = None
+    assigned_networks: Optional[List[str]] = None
+    active: Optional[bool] = None
+
+
+# ==========================================
+# AGENT SELF-SERVICE ENDPOINTS
+# ==========================================
+
+@router.post("/register")
+async def register_agent(
+    data: AgentRegistration,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Auto-registrazione di un nuovo agent.
+    
+    L'agent chiama questo endpoint al primo avvio per registrarsi.
+    Il server crea un record temporaneo che deve essere approvato
+    da un amministratore e associato a un cliente.
+    """
+    service = get_customer_service()
+    encryption = get_encryption_service()
+    
+    # Estrai IP reale dalla request se non fornito
+    client_ip = data.detected_ip
+    if not client_ip:
+        client_ip = request.client.host if request.client else None
+    
+    logger.info(f"Agent registration request: {data.agent_id} from {client_ip}")
+    
+    # Verifica se agent già esiste
+    try:
+        existing = service.get_agent_by_unique_id(data.agent_id)
+        if existing:
+            # Aggiorna info esistente
+            logger.info(f"Agent {data.agent_id} already registered, updating info")
+            
+            # Aggiorna IP e status
+            service.update_agent_status(
+                existing.id, 
+                status="online",
+                version=data.version
+            )
+            
+            # Se IP cambiato, aggiornalo
+            if client_ip and client_ip != existing.address:
+                logger.info(f"Agent {data.agent_id} IP changed: {existing.address} -> {client_ip}")
+                service.update_agent_address(existing.id, client_ip)
+            
+            return {
+                "success": True,
+                "registered": False,
+                "updated": True,
+                "agent_db_id": existing.id,
+                "message": "Agent info updated"
+            }
+    except Exception as e:
+        logger.debug(f"Agent not found, will create: {e}")
+    
+    # Crea nuovo agent (senza customer_id - deve essere approvato)
+    try:
+        from ..models.database import AgentAssignment, generate_uuid, init_db, get_session
+        from ..config import get_settings
+        
+        settings = get_settings()
+        db_url = settings.database_url.replace("+aiosqlite", "")
+        engine = init_db(db_url)
+        session = get_session(engine)
+        
+        # Genera token per l'agent
+        import secrets
+        agent_token = secrets.token_urlsafe(32)
+        
+        agent = AgentAssignment(
+            id=generate_uuid(),
+            customer_id=None,  # Da assegnare manualmente
+            name=data.agent_name,
+            address=client_ip or "pending",
+            port=8080,
+            agent_type=data.agent_type,
+            agent_api_port=8080,
+            agent_token=encryption.encrypt(agent_token),
+            agent_url=f"http://{client_ip}:8080" if client_ip else None,
+            status="pending_approval",
+            version=data.version,
+            active=False,  # Inattivo finché non approvato
+        )
+        
+        # Salva capabilities come JSON
+        if data.capabilities:
+            import json
+            agent.notes = json.dumps({"capabilities": data.capabilities, "os_info": data.os_info})
+        
+        session.add(agent)
+        session.commit()
+        
+        logger.success(f"New agent registered: {data.agent_id} ({data.agent_name}) from {client_ip}")
+        
+        return {
+            "success": True,
+            "registered": True,
+            "agent_db_id": agent.id,
+            "agent_token": agent_token,  # Invia token solo alla prima registrazione
+            "message": "Agent registered successfully. Awaiting admin approval.",
+            "next_steps": [
+                "Save the agent_token securely",
+                "An admin will approve and assign this agent to a customer",
+                "Once approved, the agent will receive its configuration"
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to register agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/heartbeat")
+async def agent_heartbeat(
+    data: AgentHeartbeat,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Heartbeat periodico dall'agent.
+    Aggiorna lo stato e restituisce eventuali comandi pendenti.
+    """
+    service = get_customer_service()
+    
+    # Estrai IP dalla request
+    client_ip = data.detected_ip or (request.client.host if request.client else None)
+    
+    try:
+        # Trova agent
+        agent = service.get_agent_by_unique_id(data.agent_id)
+        if not agent:
+            return {
+                "success": False,
+                "error": "Agent not registered",
+                "action": "register"  # Dice all'agent di registrarsi
+            }
+        
+        # Aggiorna status
+        service.update_agent_status(agent.id, status=data.status, version=data.version)
+        
+        # Se IP cambiato, aggiornalo
+        if client_ip and client_ip != agent.address:
+            service.update_agent_address(agent.id, client_ip)
+        
+        # Controlla se ci sono comandi pendenti
+        # (future: scan requests, config updates, etc.)
+        
+        return {
+            "success": True,
+            "agent_db_id": agent.id,
+            "active": agent.active,
+            "config_changed": False,  # Future: True se config è cambiata
+            "commands": []  # Future: comandi da eseguire
+        }
+        
+    except Exception as e:
+        logger.error(f"Heartbeat failed for {data.agent_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/config/{agent_id}")
+async def get_agent_config(
+    agent_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Ottiene la configurazione corrente per un agent.
+    L'agent chiama questo endpoint per ottenere/aggiornare la sua config.
+    """
+    service = get_customer_service()
+    
+    try:
+        agent = service.get_agent_by_unique_id(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        if not agent.active:
+            return {
+                "success": False,
+                "error": "Agent not approved yet",
+                "status": "pending_approval"
+            }
+        
+        # Costruisci configurazione
+        config = AgentConfigResponse(
+            agent_id=agent_id,
+            agent_name=agent.name,
+            poll_interval=60,  # Default, potrebbe essere configurabile
+            dns_servers=agent.dns_server.split(",") if agent.dns_server else ["8.8.8.8"],
+            default_ports=[22, 23, 80, 443, 161, 445, 3389, 8728],
+            config_version=1,
+            updated_at=agent.updated_at.isoformat() if agent.updated_at else None,
+        )
+        
+        # Aggiungi reti assegnate se customer_id presente
+        if agent.customer_id:
+            networks = service.list_networks(customer_id=agent.customer_id)
+            config.assigned_networks = [
+                {"id": n.id, "name": n.name, "cidr": n.cidr}
+                for n in networks
+            ]
+        
+        return {
+            "success": True,
+            "config": config.model_dump()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get config for {agent_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# ADMIN ENDPOINTS
+# ==========================================
+
+@router.get("/pending")
+async def list_pending_agents():
+    """
+    Lista agent in attesa di approvazione.
+    """
+    from ..models.database import AgentAssignment, init_db, get_session
+    from ..config import get_settings
+    
+    settings = get_settings()
+    db_url = settings.database_url.replace("+aiosqlite", "")
+    engine = init_db(db_url)
+    session = get_session(engine)
+    
+    try:
+        agents = session.query(AgentAssignment).filter(
+            AgentAssignment.customer_id == None,
+            AgentAssignment.status == "pending_approval"
+        ).all()
+        
+        return {
+            "total": len(agents),
+            "agents": [
+                {
+                    "id": a.id,
+                    "name": a.name,
+                    "address": a.address,
+                    "agent_type": a.agent_type,
+                    "version": a.version,
+                    "status": a.status,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                }
+                for a in agents
+            ]
+        }
+    finally:
+        session.close()
+
+
+@router.post("/{agent_db_id}/approve")
+async def approve_agent(
+    agent_db_id: str,
+    customer_id: str = Query(..., description="ID cliente a cui assegnare l'agent"),
+):
+    """
+    Approva un agent e lo assegna a un cliente.
+    """
+    service = get_customer_service()
+    
+    try:
+        agent = service.get_agent(agent_db_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        # Verifica che il cliente esista
+        customer = service.get_customer(customer_id)
+        if not customer:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        
+        # Aggiorna agent
+        from ..models.database import AgentAssignment, init_db, get_session
+        from ..config import get_settings
+        
+        settings = get_settings()
+        db_url = settings.database_url.replace("+aiosqlite", "")
+        engine = init_db(db_url)
+        session = get_session(engine)
+        
+        db_agent = session.query(AgentAssignment).filter(
+            AgentAssignment.id == agent_db_id
+        ).first()
+        
+        if db_agent:
+            db_agent.customer_id = customer_id
+            db_agent.active = True
+            db_agent.status = "online"
+            session.commit()
+        
+        session.close()
+        
+        logger.success(f"Agent {agent.name} approved and assigned to {customer.name}")
+        
+        return {
+            "success": True,
+            "message": f"Agent assigned to {customer.name}",
+            "agent_id": agent_db_id,
+            "customer_id": customer_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to approve agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{agent_db_id}/update-address")
+async def update_agent_address(
+    agent_db_id: str,
+    new_address: str = Query(..., description="Nuovo indirizzo IP"),
+):
+    """
+    Aggiorna l'indirizzo IP di un agent dal pannello admin.
+    """
+    service = get_customer_service()
+    
+    try:
+        success = service.update_agent_address(agent_db_id, new_address)
+        if not success:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        return {
+            "success": True,
+            "message": f"Agent address updated to {new_address}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update agent address: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{agent_db_id}/config")
+async def update_agent_config(
+    agent_db_id: str,
+    data: AgentUpdateRequest,
+):
+    """
+    Aggiorna la configurazione di un agent dal pannello admin.
+    La nuova config sarà inviata all'agent al prossimo poll.
+    """
+    service = get_customer_service()
+    
+    try:
+        agent = service.get_agent(agent_db_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        # Aggiorna campi
+        from ..models.database import AgentAssignment, init_db, get_session
+        from ..config import get_settings
+        
+        settings = get_settings()
+        db_url = settings.database_url.replace("+aiosqlite", "")
+        engine = init_db(db_url)
+        session = get_session(engine)
+        
+        db_agent = session.query(AgentAssignment).filter(
+            AgentAssignment.id == agent_db_id
+        ).first()
+        
+        if db_agent:
+            if data.name:
+                db_agent.name = data.name
+            if data.address:
+                db_agent.address = data.address
+                db_agent.agent_url = f"http://{data.address}:{db_agent.agent_api_port}"
+            if data.dns_servers:
+                db_agent.dns_server = ",".join(data.dns_servers)
+            if data.active is not None:
+                db_agent.active = data.active
+            
+            session.commit()
+        
+        session.close()
+        
+        return {
+            "success": True,
+            "message": "Agent configuration updated"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update agent config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+

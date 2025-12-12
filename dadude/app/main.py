@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .config import get_settings
 from .services import get_dude_service, get_sync_service
-from .routers import devices, probes, alerts, webhook, system, customers, import_export, dashboard, discovery, mikrotik, inventory
+from .routers import devices, probes, alerts, webhook, system, customers, import_export, dashboard, discovery, mikrotik, inventory, agents
 
 
 # Configura logging
@@ -153,6 +153,7 @@ app.include_router(mikrotik.router, prefix="/api/v1")
 app.include_router(inventory.router, prefix="/api/v1")
 app.include_router(import_export.router, prefix="/api/v1")
 app.include_router(discovery.router, prefix="/api/v1")
+app.include_router(agents.router, prefix="/api/v1")
 
 # Dashboard (senza prefisso API)
 app.include_router(dashboard.router)

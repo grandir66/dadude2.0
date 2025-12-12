@@ -1,21 +1,12 @@
 #!/bin/bash
 #
-# DaDude Server - Installer per Proxmox VE
-# Crea un container LXC con il server DaDude
-#
-# Uso: curl -sSL https://raw.githubusercontent.com/grandir66/Dadude/main/dadude/deploy/proxmox/install-server.sh | bash -s -- [OPZIONI]
-#
-# Opzioni:
-#   --ctid ID             ID container Proxmox (default: prossimo disponibile)
-#   --hostname NAME       Hostname container (default: dadude-server)
-#   --ip CIDR             IP statico (es: 192.168.1.100/24)
-#   --gateway IP          Gateway
-#   --storage STORAGE     Storage Proxmox (default: local-lvm)
-#   --memory MB           RAM in MB (default: 1024)
-#   --disk GB             Disco in GB (default: 8)
-#   --dude-host IP        IP del Dude Server MikroTik
-#   --dude-user USER      Username Dude (default: admin)
-#   --dude-pass PASS      Password Dude
+# DaDude Server - Installazione su Proxmox LXC
+# 
+# Uso:
+#   curl -fsSL https://raw.githubusercontent.com/grandir66/dadude/main/dadude/deploy/proxmox/install-server.sh | bash -s -- \
+#     --ip 192.168.40.3 \
+#     --gateway 192.168.40.1 \
+#     --ctid 800
 #
 
 set -e
@@ -27,62 +18,90 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Valori default
+log() { echo -e "${GREEN}[DaDude]${NC} $1"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+
+# Defaults
 CTID=""
 HOSTNAME="dadude-server"
-BRIDGE="vmbr0"
 STORAGE="local-lvm"
 TEMPLATE_STORAGE="local"
 MEMORY=1024
-DISK=8
-IP_CONFIG="dhcp"
+DISK=10
+IP_ADDRESS=""
 GATEWAY=""
-DUDE_HOST=""
-DUDE_USER="admin"
-DUDE_PASS=""
-TEMPLATE="debian-12-standard"
+BRIDGE="vmbr0"
+SERVER_PORT=8000
+DNS="8.8.8.8"
 
-# Parse argomenti
+# Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --ctid) CTID="$2"; shift 2 ;;
         --hostname) HOSTNAME="$2"; shift 2 ;;
-        --ip) IP_CONFIG="$2"; shift 2 ;;
+        --ip) IP_ADDRESS="$2"; shift 2 ;;
         --gateway) GATEWAY="$2"; shift 2 ;;
         --bridge) BRIDGE="$2"; shift 2 ;;
-        --storage) STORAGE="$2"; shift 2 ;;
         --memory) MEMORY="$2"; shift 2 ;;
         --disk) DISK="$2"; shift 2 ;;
-        --dude-host) DUDE_HOST="$2"; shift 2 ;;
-        --dude-user) DUDE_USER="$2"; shift 2 ;;
-        --dude-pass) DUDE_PASS="$2"; shift 2 ;;
-        *) echo -e "${RED}Opzione sconosciuta: $1${NC}"; exit 1 ;;
+        --storage) STORAGE="$2"; shift 2 ;;
+        --dns) DNS="$2"; shift 2 ;;
+        --port) SERVER_PORT="$2"; shift 2 ;;
+        -h|--help)
+            echo "Uso: $0 [opzioni]"
+            echo ""
+            echo "Opzioni:"
+            echo "  --ctid ID         ID container (default: auto)"
+            echo "  --hostname NAME   Hostname (default: dadude-server)"
+            echo "  --ip IP/MASK      IP address (es: 192.168.40.3/24)"
+            echo "  --gateway IP      Gateway"
+            echo "  --bridge NAME     Bridge di rete (default: vmbr0)"
+            echo "  --memory MB       Memoria in MB (default: 1024)"
+            echo "  --disk GB         Disco in GB (default: 10)"
+            echo "  --port PORT       Porta server (default: 8000)"
+            echo "  --dns IP          DNS server (default: 8.8.8.8)"
+            exit 0
+            ;;
+        *) error "Opzione sconosciuta: $1" ;;
     esac
 done
 
-echo -e "${BLUE}"
-echo "╔══════════════════════════════════════════╗"
-echo "║    DaDude Server - Proxmox Installer     ║"
-echo "╚══════════════════════════════════════════╝"
-echo -e "${NC}"
-
-# Genera CTID se non specificato
-if [ -z "$CTID" ]; then
-    CTID=$(pvesh get /cluster/nextid)
+# Verifica che siamo su Proxmox
+if ! command -v pct &> /dev/null; then
+    error "Questo script deve essere eseguito su un host Proxmox"
 fi
 
+# Verifica parametri obbligatori
+if [[ -z "$IP_ADDRESS" ]]; then
+    error "IP address richiesto (--ip 192.168.x.x/24)"
+fi
+if [[ -z "$GATEWAY" ]]; then
+    error "Gateway richiesto (--gateway 192.168.x.1)"
+fi
+
+# Auto CTID se non specificato
+if [[ -z "$CTID" ]]; then
+    CTID=$(pvesh get /cluster/nextid)
+    log "Usando CTID: $CTID"
+fi
+
+# Genera chiave di encryption
+ENCRYPTION_KEY=$(openssl rand -hex 32)
+
+echo ""
+echo -e "${BLUE}╔══════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║     DaDude Server - Proxmox Install      ║${NC}"
+echo -e "${BLUE}╚══════════════════════════════════════════╝${NC}"
+echo ""
 echo "Configurazione:"
 echo "  CTID:        $CTID"
 echo "  Hostname:    $HOSTNAME"
-echo "  Storage:     $STORAGE"
+echo "  IP:          $IP_ADDRESS"
+echo "  Gateway:     $GATEWAY"
+echo "  Porta:       $SERVER_PORT"
 echo "  Memory:      ${MEMORY}MB"
 echo "  Disk:        ${DISK}GB"
-if [ "$IP_CONFIG" != "dhcp" ]; then
-    echo "  Network:     $BRIDGE ($IP_CONFIG)"
-    echo "  Gateway:     $GATEWAY"
-else
-    echo "  Network:     $BRIDGE (DHCP)"
-fi
 echo ""
 
 read -p "Procedere con l'installazione? [y/N] " -n 1 -r
@@ -92,134 +111,178 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
-# Scarica template se non esiste
-echo -e "${BLUE}[1/6] Verifico template...${NC}"
-TEMPLATE_NAME=""
-for t_name in "debian-12-standard" "debian-11-standard" "ubuntu-22.04-standard"; do
-    TEMPLATE_PATH=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -i "$t_name" | head -1 | awk '{print $1}' || true)
-    if [ -n "$TEMPLATE_PATH" ]; then
-        TEMPLATE_NAME="$TEMPLATE_PATH"
-        break
+# [1/6] Verifica template
+log "[1/6] Verifico template..."
+
+# Cerca template Debian disponibile
+TEMPLATE=$(pveam list $TEMPLATE_STORAGE 2>/dev/null | grep -E "debian-12|debian-11" | head -1 | awk '{print $1}')
+
+if [[ -z "$TEMPLATE" ]]; then
+    log "Nessun template trovato. Cerco template disponibili..."
+    pveam update
+    
+    # Lista template disponibili
+    AVAILABLE=$(pveam available --section system | grep -E "debian-12|debian-11|ubuntu-22|ubuntu-24" | head -1 | awk '{print $2}')
+    
+    if [[ -z "$AVAILABLE" ]]; then
+        error "Nessun template Debian/Ubuntu disponibile"
     fi
-done
-
-if [ -z "$TEMPLATE_NAME" ]; then
-    echo "Nessun template trovato. Scarico Debian 12..."
-    pveam update > /dev/null 2>&1
-    AVAILABLE=$(pveam available | grep -i "debian-12-standard" | head -1 | awk '{print $2}' || true)
-    if [ -n "$AVAILABLE" ]; then
-        pveam download $TEMPLATE_STORAGE "$AVAILABLE"
-        TEMPLATE_NAME="$TEMPLATE_STORAGE:vztmpl/$AVAILABLE"
-    else
-        echo -e "${RED}Errore: impossibile trovare template Debian${NC}"
-        exit 1
-    fi
-fi
-
-echo -e "${GREEN}Template: $TEMPLATE_NAME${NC}"
-
-# Crea container
-echo -e "${BLUE}[2/6] Creo container LXC...${NC}"
-
-NET_CONFIG="name=eth0,bridge=$BRIDGE"
-if [ "$IP_CONFIG" != "dhcp" ]; then
-    NET_CONFIG="$NET_CONFIG,ip=$IP_CONFIG"
-    if [ -n "$GATEWAY" ]; then
-        NET_CONFIG="$NET_CONFIG,gw=$GATEWAY"
-    fi
+    
+    log "Scarico template: $AVAILABLE"
+    pveam download $TEMPLATE_STORAGE $AVAILABLE || error "Download template fallito"
+    TEMPLATE="${TEMPLATE_STORAGE}:vztmpl/${AVAILABLE}"
 else
-    NET_CONFIG="$NET_CONFIG,ip=dhcp"
+    log "Template trovato: $TEMPLATE"
 fi
 
-pct create $CTID "$TEMPLATE_NAME" \
-    --hostname "$HOSTNAME" \
-    --storage "$STORAGE" \
-    --rootfs "$STORAGE:$DISK" \
-    --memory "$MEMORY" \
-    --swap 512 \
+# [2/6] Crea container
+log "[2/6] Creo container LXC..."
+
+pct create $CTID $TEMPLATE \
+    --hostname $HOSTNAME \
+    --storage $STORAGE \
+    --rootfs ${STORAGE}:${DISK} \
+    --memory $MEMORY \
     --cores 2 \
-    --net0 "$NET_CONFIG" \
+    --net0 name=eth0,bridge=$BRIDGE,ip=$IP_ADDRESS,gw=$GATEWAY \
+    --nameserver $DNS \
     --unprivileged 1 \
     --features nesting=1 \
-    --start 1
+    --onboot 1 \
+    --start 1 || error "Creazione container fallita"
+
+log "Container $CTID creato"
 
 # Attendi avvio
-echo -e "${BLUE}[3/6] Attendo avvio container...${NC}"
-sleep 10
+sleep 5
 
-# Installa dipendenze
-echo -e "${BLUE}[4/6] Installo dipendenze...${NC}"
+# [3/6] Installa Docker
+log "[3/6] Installo Docker..."
+
 pct exec $CTID -- bash -c "
     apt-get update
-    apt-get install -y python3 python3-pip python3-venv git curl
-"
+    apt-get install -y ca-certificates curl gnupg
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+    echo \"deb [arch=\$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \$(. /etc/os-release && echo \$VERSION_CODENAME) stable\" > /etc/apt/sources.list.d/docker.list
+    apt-get update
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin git
+" || error "Installazione Docker fallita"
 
-# Clona repository e configura
-echo -e "${BLUE}[5/6] Installo DaDude Server...${NC}"
+# [4/6] Clone repository
+log "[4/6] Clono repository DaDude..."
+
 pct exec $CTID -- bash -c "
-    cd /opt
-    git clone https://github.com/grandir66/Dadude.git dadude
-    cd dadude/dadude
-    
-    # Crea virtual environment
-    python3 -m venv venv
-    source venv/bin/activate
-    pip install --upgrade pip
-    pip install -r requirements.txt
-    
-    # Crea directory dati
-    mkdir -p data
-    
-    # Crea file .env
-    cat > .env << EOF
+    mkdir -p /opt/dadude
+    cd /opt/dadude
+    git clone https://github.com/grandir66/dadude.git . || true
+    cd dadude
+" || warn "Clone repository (potrebbe già esistere)"
+
+# [5/6] Configura e avvia
+log "[5/6] Configuro e avvio DaDude..."
+
+# Crea file .env
+pct exec $CTID -- bash -c "
+cat > /opt/dadude/dadude/.env << 'ENVFILE'
 # DaDude Server Configuration
-DATABASE_URL=sqlite:///./data/dadude.db
+DATABASE_URL=sqlite+aiosqlite:///./data/dadude.db
+ENCRYPTION_KEY=${ENCRYPTION_KEY}
 
-# Dude Server Connection
-DUDE_HOST=${DUDE_HOST:-192.168.30.250}
-DUDE_PORT=8728
-DUDE_USERNAME=${DUDE_USER:-admin}
-DUDE_PASSWORD=${DUDE_PASS:-}
-DUDE_USE_SSL=false
-
-# Server Settings
+# Server
 HOST=0.0.0.0
-PORT=8000
+PORT=${SERVER_PORT}
 DEBUG=false
-EOF
+
+# Dude Server (opzionale)
+DUDE_HOST=
+DUDE_USER=
+DUDE_PASSWORD=
+DUDE_PORT=8728
+ENVFILE
 "
 
-# Crea systemd service
-echo -e "${BLUE}[6/6] Configuro servizio systemd...${NC}"
-pct exec $CTID -- bash -c '
-cat > /etc/systemd/system/dadude.service << "EOF"
-[Unit]
-Description=DaDude Inventory Server
-After=network.target
+# Crea docker-compose.yml
+pct exec $CTID -- bash -c "
+cat > /opt/dadude/dadude/docker-compose.yml << 'COMPOSEFILE'
+version: '3.8'
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/dadude/dadude
-Environment=PATH=/opt/dadude/dadude/venv/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/opt/dadude/dadude/venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=10
+services:
+  dadude-server:
+    build: .
+    container_name: dadude-server
+    restart: unless-stopped
+    ports:
+      - \"${SERVER_PORT}:8000\"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    environment:
+      - TZ=Europe/Rome
+    healthcheck:
+      test: [\"CMD\", \"curl\", \"-f\", \"http://localhost:8000/health\"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+COMPOSEFILE
+"
 
-[Install]
-WantedBy=multi-user.target
-EOF
+# Crea Dockerfile se non esiste
+pct exec $CTID -- bash -c "
+if [ ! -f /opt/dadude/dadude/Dockerfile ]; then
+cat > /opt/dadude/dadude/Dockerfile << 'DOCKERFILE'
+FROM python:3.11-slim
 
-systemctl daemon-reload
-systemctl enable dadude
-systemctl start dadude
-'
+WORKDIR /app
 
-# Ottieni IP
-if [ "$IP_CONFIG" != "dhcp" ]; then
-    SERVER_IP=$(echo "$IP_CONFIG" | cut -d'/' -f1)
+# Installa dipendenze sistema
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    gcc libffi-dev curl \\
+    && rm -rf /var/lib/apt/lists/*
+
+# Copia requirements e installa
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copia applicazione
+COPY . .
+
+# Crea directory dati
+RUN mkdir -p /app/data
+
+# Esponi porta
+EXPOSE 8000
+
+# Avvia server
+CMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]
+DOCKERFILE
+fi
+"
+
+# Crea directory dati
+pct exec $CTID -- mkdir -p /opt/dadude/dadude/data
+
+# Build e avvia
+pct exec $CTID -- bash -c "
+    cd /opt/dadude/dadude
+    docker compose build
+    docker compose up -d
+"
+
+# [6/6] Verifica
+log "[6/6] Verifico installazione..."
+
+sleep 10
+
+# Estrai IP senza maschera
+SERVER_IP=$(echo $IP_ADDRESS | cut -d'/' -f1)
+
+# Test health
+if pct exec $CTID -- curl -sf http://localhost:${SERVER_PORT}/health > /dev/null 2>&1; then
+    log "✅ Server DaDude attivo!"
 else
-    SERVER_IP=$(pct exec $CTID -- hostname -I | awk '{print $1}')
+    warn "Server potrebbe richiedere più tempo per avviarsi"
 fi
 
 echo ""
@@ -229,12 +292,19 @@ echo -e "${GREEN}╚════════════════════
 echo ""
 echo "Container ID:  $CTID"
 echo "Hostname:      $HOSTNAME"
-echo "Server IP:     $SERVER_IP"
-echo "Web UI:        http://$SERVER_IP:8000"
+echo "Server URL:    http://${SERVER_IP}:${SERVER_PORT}"
+echo "Dashboard:     http://${SERVER_IP}:${SERVER_PORT}/"
+echo ""
+echo "Encryption Key (salva in un posto sicuro):"
+echo "  $ENCRYPTION_KEY"
 echo ""
 echo "Comandi utili:"
-echo "  pct enter $CTID                    # Entra nel container"
-echo "  pct exec $CTID -- systemctl status dadude"
-echo "  pct exec $CTID -- journalctl -u dadude -f"
+echo "  pct enter $CTID                              # Entra nel container"
+echo "  pct exec $CTID -- docker logs -f dadude-server  # Vedi log"
+echo "  pct exec $CTID -- docker compose -f /opt/dadude/dadude/docker-compose.yml restart"
 echo ""
-
+echo "Prossimi passi:"
+echo "  1. Accedi a http://${SERVER_IP}:${SERVER_PORT}/"
+echo "  2. Crea un cliente"
+echo "  3. Installa agent sui siti remoti"
+echo ""

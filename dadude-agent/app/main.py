@@ -522,6 +522,130 @@ async def batch_probe(
 
 
 # ==========================================
+# AUTO-REGISTRATION & HEARTBEAT
+# ==========================================
+
+import socket
+import platform
+import httpx
+
+async def get_local_ip() -> str:
+    """Rileva l'IP locale dell'agent"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "unknown"
+
+
+async def register_with_server():
+    """Registra l'agent con il server centrale"""
+    settings = get_settings()
+    
+    if not settings.server_url:
+        logger.warning("No server URL configured, skipping registration")
+        return
+    
+    try:
+        local_ip = await get_local_ip()
+        hostname = socket.gethostname()
+        
+        registration_data = {
+            "agent_id": settings.agent_id,
+            "agent_name": settings.agent_name,
+            "agent_type": "docker",
+            "version": "1.0.0",
+            "detected_ip": local_ip,
+            "detected_hostname": hostname,
+            "capabilities": ["wmi", "ssh", "snmp", "port_scan", "dns_reverse", "nmap"],
+            "os_info": f"{platform.system()} {platform.release()}",
+            "python_version": platform.python_version(),
+        }
+        
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{settings.server_url}/api/v1/agents/register",
+                json=registration_data,
+                headers={"Authorization": f"Bearer {settings.agent_token}"}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("registered"):
+                    logger.success(f"Agent registered successfully! Token: {result.get('agent_token', 'N/A')}")
+                    # Salva il nuovo token se fornito
+                    if result.get("agent_token"):
+                        logger.info("Save this token in your agent configuration!")
+                elif result.get("updated"):
+                    logger.info("Agent info updated on server")
+            else:
+                logger.warning(f"Registration failed: {response.status_code} - {response.text}")
+                
+    except Exception as e:
+        logger.warning(f"Could not register with server: {e}")
+
+
+async def send_heartbeat():
+    """Invia heartbeat periodico al server"""
+    settings = get_settings()
+    
+    if not settings.server_url:
+        return
+    
+    try:
+        local_ip = await get_local_ip()
+        
+        heartbeat_data = {
+            "agent_id": settings.agent_id,
+            "status": "online",
+            "version": "1.0.0",
+            "detected_ip": local_ip,
+        }
+        
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{settings.server_url}/api/v1/agents/heartbeat",
+                json=heartbeat_data,
+                headers={"Authorization": f"Bearer {settings.agent_token}"}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("action") == "register":
+                    logger.info("Server requested re-registration")
+                    await register_with_server()
+                    
+    except Exception as e:
+        logger.debug(f"Heartbeat failed: {e}")
+
+
+async def heartbeat_loop():
+    """Loop di heartbeat"""
+    settings = get_settings()
+    
+    # Prima registrazione
+    await register_with_server()
+    
+    # Heartbeat ogni 60 secondi
+    while True:
+        await asyncio.sleep(settings.poll_interval)
+        await send_heartbeat()
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Avvio dell'agent"""
+    settings = get_settings()
+    logger.info(f"Agent {settings.agent_id} starting...")
+    
+    # Avvia heartbeat in background
+    asyncio.create_task(heartbeat_loop())
+
+
+# ==========================================
 # MAIN
 # ==========================================
 

@@ -1134,6 +1134,74 @@ class CustomerService:
         finally:
             session.close()
     
+    def get_agent_by_unique_id(self, agent_unique_id: str) -> Optional[AgentAssignmentSafe]:
+        """Trova agent per ID univoco (usato per auto-registrazione)"""
+        session = self._get_session()
+        try:
+            # Cerca per ID diretto o per nome che contiene l'ID
+            agent = session.query(AgentAssignmentDB).filter(
+                or_(
+                    AgentAssignmentDB.id == agent_unique_id,
+                    AgentAssignmentDB.name.contains(agent_unique_id)
+                )
+            ).first()
+            
+            if not agent:
+                return None
+            
+            return self._to_agent_safe(agent)
+            
+        finally:
+            session.close()
+    
+    def update_agent_address(self, agent_id: str, new_address: str) -> bool:
+        """Aggiorna l'indirizzo IP di un agent"""
+        session = self._get_session()
+        try:
+            agent = session.query(AgentAssignmentDB).filter(
+                AgentAssignmentDB.id == agent_id
+            ).first()
+            
+            if not agent:
+                return False
+            
+            old_address = agent.address
+            agent.address = new_address
+            agent.agent_url = f"http://{new_address}:{agent.agent_api_port or 8080}"
+            agent.updated_at = datetime.utcnow()
+            
+            session.commit()
+            
+            logger.info(f"Updated agent {agent.name} address: {old_address} -> {new_address}")
+            return True
+            
+        finally:
+            session.close()
+    
+    def _to_agent_safe(self, agent: AgentAssignmentDB) -> AgentAssignmentSafe:
+        """Converte agent DB in versione safe"""
+        return AgentAssignmentSafe(
+            id=agent.id,
+            customer_id=agent.customer_id or "",
+            name=agent.name,
+            address=agent.address,
+            port=agent.port or 8728,
+            agent_type=agent.agent_type or "mikrotik",
+            dude_agent_id=agent.dude_agent_id,
+            status=agent.status or "unknown",
+            last_seen=agent.last_seen,
+            version=agent.version,
+            assigned_networks=agent.assigned_networks.split(",") if agent.assigned_networks else [],
+            use_ssl=agent.use_ssl or False,
+            ssh_port=agent.ssh_port or 22,
+            agent_api_port=agent.agent_api_port or 8080,
+            agent_url=agent.agent_url,
+            dns_server=agent.dns_server,
+            active=agent.active if agent.active is not None else False,
+            created_at=agent.created_at,
+            updated_at=agent.updated_at,
+        )
+    
     # ==========================================
     # CREDENTIAL LINKS (Archivio Centralizzato)
     # ==========================================
