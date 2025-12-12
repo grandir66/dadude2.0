@@ -110,9 +110,9 @@ async def register_agent(
     
     logger.info(f"Agent registration request: {data.agent_id} from {client_ip}")
     
-    # Verifica se agent già esiste
+    # Verifica se agent già esiste (per ID, nome o indirizzo)
     try:
-        existing = service.get_agent_by_unique_id(data.agent_id)
+        existing = service.get_agent_by_unique_id(data.agent_id, address=client_ip)
         if existing:
             # Aggiorna info esistente
             logger.info(f"Agent {data.agent_id} already registered, updating info")

@@ -1134,22 +1134,44 @@ class CustomerService:
         finally:
             session.close()
     
-    def get_agent_by_unique_id(self, agent_unique_id: str) -> Optional[AgentAssignmentSafe]:
+    def get_agent_by_unique_id(self, agent_unique_id: str, address: str = None) -> Optional[AgentAssignmentSafe]:
         """Trova agent per ID univoco (usato per auto-registrazione)"""
         session = self._get_session()
         try:
-            # Cerca per ID diretto o per nome che contiene l'ID
+            # Prima cerca per ID database diretto
             agent = session.query(AgentAssignmentDB).filter(
-                or_(
-                    AgentAssignmentDB.id == agent_unique_id,
-                    AgentAssignmentDB.name.contains(agent_unique_id)
-                )
+                AgentAssignmentDB.id == agent_unique_id
             ).first()
             
-            if not agent:
-                return None
+            if agent:
+                return self._to_agent_safe(agent)
             
-            return self._to_agent_safe(agent)
+            # Poi cerca per nome esatto (agent_id)
+            agent = session.query(AgentAssignmentDB).filter(
+                AgentAssignmentDB.name == agent_unique_id
+            ).first()
+            
+            if agent:
+                return self._to_agent_safe(agent)
+            
+            # Cerca per indirizzo IP (se fornito)
+            if address:
+                agent = session.query(AgentAssignmentDB).filter(
+                    AgentAssignmentDB.address == address
+                ).first()
+                
+                if agent:
+                    return self._to_agent_safe(agent)
+            
+            # Cerca per agent_url contenente l'ID
+            agent = session.query(AgentAssignmentDB).filter(
+                AgentAssignmentDB.agent_url.contains(agent_unique_id)
+            ).first()
+            
+            if agent:
+                return self._to_agent_safe(agent)
+            
+            return None
             
         finally:
             session.close()
