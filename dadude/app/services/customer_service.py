@@ -846,6 +846,11 @@ class CustomerService:
             if ssh_key:
                 ssh_key = enc_service.encrypt(ssh_key)
             
+            # Encrypt agent_token se presente
+            agent_token = getattr(data, 'agent_token', None)
+            if agent_token:
+                agent_token = enc_service.encrypt(agent_token)
+            
             # Crea sonda
             agent = AgentAssignmentDB(
                 customer_id=data.customer_id,
@@ -861,6 +866,13 @@ class CustomerService:
                 use_ssl=data.use_ssl,
                 ssh_port=data.ssh_port,
                 ssh_key=ssh_key,
+                # Nuovi campi Docker Agent
+                agent_type=getattr(data, 'agent_type', 'mikrotik'),
+                agent_api_port=getattr(data, 'agent_api_port', 8080),
+                agent_token=agent_token,
+                agent_url=getattr(data, 'agent_url', None),
+                dns_server=getattr(data, 'dns_server', None),
+                # Altri campi
                 default_scan_type=data.default_scan_type,
                 auto_add_devices=data.auto_add_devices,
                 assigned_networks=data.assigned_networks,
@@ -948,12 +960,14 @@ class CustomerService:
             
             update_data = data.model_dump(exclude_unset=True)
             
-            # Encrypt password e ssh_key se presenti
+            # Encrypt password, ssh_key e agent_token se presenti
             enc_service = get_encryption_service()
             if "password" in update_data and update_data["password"]:
                 update_data["password"] = enc_service.encrypt(update_data["password"])
             if "ssh_key" in update_data and update_data["ssh_key"]:
                 update_data["ssh_key"] = enc_service.encrypt(update_data["ssh_key"])
+            if "agent_token" in update_data and update_data["agent_token"]:
+                update_data["agent_token"] = enc_service.encrypt(update_data["agent_token"])
             
             for key, value in update_data.items():
                 setattr(agent, key, value)

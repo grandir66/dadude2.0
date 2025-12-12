@@ -57,6 +57,13 @@ class DNSReverseRequest(BaseModel):
     dns_server: Optional[str] = None
 
 
+class NetworkScanRequest(BaseModel):
+    """Richiesta scansione rete"""
+    network: str  # CIDR notation, es: 192.168.1.0/24
+    scan_type: str = "ping"  # ping, arp, all
+    timeout: float = 1.0
+
+
 class BatchProbeRequest(BaseModel):
     """Richiesta batch dal server centrale"""
     task_id: str
@@ -303,6 +310,82 @@ async def scan_ports(
         return {
             "success": False,
             "target": request.target,
+            "error": str(e),
+        }
+
+
+@app.post("/scan/network")
+async def scan_network(
+    request: NetworkScanRequest,
+    authorized: bool = Depends(verify_token)
+):
+    """
+    Scansiona una rete per trovare host attivi.
+    Usa ping sweep o ARP scan.
+    """
+    import ipaddress
+    import subprocess
+    import asyncio
+    
+    start_time = datetime.now()
+    
+    try:
+        network = ipaddress.ip_network(request.network, strict=False)
+        hosts = list(network.hosts())
+        
+        # Limita a max 256 host per evitare timeout
+        if len(hosts) > 256:
+            hosts = hosts[:256]
+        
+        logger.info(f"Scanning network {request.network} ({len(hosts)} hosts)")
+        
+        results = []
+        
+        async def ping_host(ip: str) -> Optional[Dict]:
+            """Ping singolo host"""
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ping", "-c", "1", "-W", str(int(request.timeout)),
+                    str(ip),
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(proc.wait(), timeout=request.timeout + 1)
+                
+                if proc.returncode == 0:
+                    return {"address": str(ip), "alive": True}
+            except asyncio.TimeoutError:
+                pass
+            except Exception:
+                pass
+            return None
+        
+        # Esegui ping in parallelo (max 50 alla volta)
+        batch_size = 50
+        for i in range(0, len(hosts), batch_size):
+            batch = hosts[i:i+batch_size]
+            tasks = [ping_host(str(ip)) for ip in batch]
+            batch_results = await asyncio.gather(*tasks)
+            results.extend([r for r in batch_results if r])
+        
+        duration = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        logger.info(f"Network scan completed: {len(results)}/{len(hosts)} hosts found")
+        
+        return {
+            "success": True,
+            "network": request.network,
+            "scan_type": request.scan_type,
+            "devices_found": len(results),
+            "results": results,
+            "duration_ms": duration,
+        }
+        
+    except Exception as e:
+        logger.error(f"Network scan failed for {request.network}: {e}")
+        return {
+            "success": False,
+            "network": request.network,
             "error": str(e),
         }
 

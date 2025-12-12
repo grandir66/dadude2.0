@@ -437,6 +437,11 @@ async def create_customer_agent(customer_id: str, data: AgentAssignmentCreate):
     """
     data.customer_id = customer_id
     
+    # Log dei dati ricevuti per debug
+    logger.info(f"Creating agent for customer {customer_id}: name={data.name}, address={data.address}, "
+                f"agent_type={data.agent_type}, agent_api_port={data.agent_api_port}, "
+                f"agent_token={'***' if data.agent_token else None}")
+    
     try:
         service = get_customer_service()
         return service.create_agent(data)
@@ -911,12 +916,37 @@ async def scan_customer_networks(
     if not networks:
         raise HTTPException(status_code=400, detail="Nessuna rete valida selezionata")
     
-    # Esegui scansione diretta tramite il router
+    # Esegui scansione diretta tramite il router o Docker agent
     scanner = get_scanner_service()
     network = networks[0]  # Prima rete
     
-    # Usa API o SSH in base al tipo di connessione
-    if agent.connection_type in ["api", "both"]:
+    # Verifica tipo agent
+    agent_type = getattr(agent, 'agent_type', 'mikrotik') or 'mikrotik'
+    
+    if agent_type == "docker":
+        # Scansione tramite Docker Agent
+        from ..services.agent_client import AgentClient, AgentConfig
+        
+        agent_url = agent.agent_url or f"http://{agent.address}:{agent.agent_api_port or 8080}"
+        agent_config = AgentConfig(
+            agent_id=agent.id,
+            agent_url=agent_url,
+            agent_token=agent.agent_token or "",
+        )
+        
+        agent_client = AgentClient(agent_config)
+        try:
+            # Scansione rete tramite Docker agent
+            # L'agent farà ping/arp scan della rete
+            scan_result = await agent_client.scan_network(network.ip_network, scan_type=scan_type)
+        except Exception as e:
+            logger.error(f"Docker agent scan failed: {e}")
+            raise HTTPException(status_code=500, detail=f"Errore scansione Docker agent: {e}")
+        finally:
+            await agent_client.close()
+    
+    # MikroTik agent - Usa API o SSH in base al tipo di connessione
+    elif agent.connection_type in ["api", "both"]:
         scan_result = scanner.scan_network_via_router(
             router_address=agent.address,
             router_port=agent.port,

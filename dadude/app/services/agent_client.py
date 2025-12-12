@@ -147,6 +147,27 @@ class AgentClient:
             logger.error(f"Agent port scan failed: {e}")
             return {"success": False, "error": str(e)}
     
+    async def scan_network(
+        self,
+        network: str,
+        scan_type: str = "ping",
+        timeout: float = 1.0,
+    ) -> Dict[str, Any]:
+        """Esegue network scan tramite agent"""
+        client = await self._get_client()
+        
+        try:
+            response = await client.post("/scan/network", json={
+                "network": network,
+                "scan_type": scan_type,
+                "timeout": timeout,
+            })
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"Agent network scan failed: {e}")
+            return {"success": False, "error": str(e)}
+    
     async def dns_reverse(
         self,
         targets: List[str],
