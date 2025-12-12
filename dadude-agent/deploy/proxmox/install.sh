@@ -75,46 +75,115 @@ echo "║     DaDude Agent - Proxmox Installer     ║"
 echo "╚══════════════════════════════════════════╝"
 echo -e "${NC}"
 
-# Verifica parametri obbligatori
-if [ -z "$SERVER_URL" ]; then
-    echo -e "${RED}Errore: --server-url è richiesto${NC}"
-    echo "Esempio: --server-url https://dadude.example.com"
-    exit 1
-fi
-
-# Se nessun token, usa auto-registrazione
-if [ -z "$AGENT_TOKEN" ]; then
-    AGENT_TOKEN=$(openssl rand -hex 16)
-    echo -e "${YELLOW}Nessun token specificato. L'agent userà auto-registrazione.${NC}"
-    echo -e "${YELLOW}Dopo l'avvio, approva l'agent da: ${SERVER_URL}/agents${NC}"
-fi
-
 # Verifica siamo su Proxmox
 if ! command -v pct &> /dev/null; then
     echo -e "${RED}Errore: Questo script deve essere eseguito su un host Proxmox VE${NC}"
     exit 1
 fi
 
+# ==========================================
+# MODALITÀ INTERATTIVA - Chiedi parametri mancanti
+# ==========================================
+
+# Server URL
+if [ -z "$SERVER_URL" ]; then
+    echo -e "${YELLOW}Configurazione Server${NC}"
+    read -p "URL del server DaDude (es: http://192.168.1.100:8000): " SERVER_URL
+    if [ -z "$SERVER_URL" ]; then
+        echo -e "${RED}Errore: URL server richiesto${NC}"
+        exit 1
+    fi
+fi
+
+# Agent Name
+if [ -z "$AGENT_NAME" ] || [ "$AGENT_NAME" == "DaDude Agent" ]; then
+    read -p "Nome dell'agent [DaDude Agent]: " input
+    AGENT_NAME="${input:-DaDude Agent}"
+fi
+
+# Bridge
+echo ""
+echo -e "${YELLOW}Configurazione Rete${NC}"
+echo "Bridge disponibili:"
+ip link show type bridge 2>/dev/null | grep -E "^[0-9]+" | awk -F': ' '{print "  - " $2}' || echo "  (nessun bridge trovato)"
+brctl show 2>/dev/null | tail -n +2 | awk '{print "  - " $1}' || true
+echo ""
+if [ "$BRIDGE" == "vmbr0" ]; then
+    read -p "Bridge da usare [vmbr0]: " input
+    BRIDGE="${input:-vmbr0}"
+fi
+
+# VLAN
+if [ -z "$VLAN" ]; then
+    read -p "VLAN tag (lascia vuoto se non usato): " VLAN
+fi
+
+# IP
+if [ "$IP_CONFIG" == "dhcp" ]; then
+    read -p "Indirizzo IP (es: 192.168.1.100/24, o 'dhcp'): " input
+    IP_CONFIG="${input:-dhcp}"
+fi
+
+# Gateway (solo se IP statico)
+if [ "$IP_CONFIG" != "dhcp" ] && [ -z "$GATEWAY" ]; then
+    # Suggerisci gateway basato sull'IP
+    suggested_gw=$(echo "$IP_CONFIG" | sed 's|/.*||' | sed 's|\.[0-9]*$|.1|')
+    read -p "Gateway [$suggested_gw]: " input
+    GATEWAY="${input:-$suggested_gw}"
+fi
+
+# DNS Server
+if [ -z "$DNS_SERVER" ]; then
+    if [ -n "$GATEWAY" ]; then
+        read -p "DNS Server [$GATEWAY]: " input
+        DNS_SERVER="${input:-$GATEWAY}"
+    else
+        read -p "DNS Server [8.8.8.8]: " input
+        DNS_SERVER="${input:-8.8.8.8}"
+    fi
+fi
+
+# Token - genera automaticamente
+if [ -z "$AGENT_TOKEN" ]; then
+    AGENT_TOKEN=$(openssl rand -hex 24)
+    echo ""
+    echo -e "${GREEN}Token generato automaticamente.${NC}"
+    echo -e "${YELLOW}L'agent si registrerà sul server e dovrà essere approvato.${NC}"
+fi
+
 # Trova prossimo CTID disponibile se non specificato
 if [ -z "$CTID" ]; then
     CTID=$(pvesh get /cluster/nextid)
-    echo -e "${GREEN}Usando CTID: $CTID${NC}"
 fi
 
 # Genera agent_id se non specificato
 if [ -z "$AGENT_ID" ]; then
-    AGENT_ID="agent-${HOSTNAME}-$(date +%s | tail -c 5)"
+    AGENT_ID="agent-$(echo $AGENT_NAME | tr ' ' '-' | tr '[:upper:]' '[:lower:]')-$(date +%s | tail -c 5)"
 fi
 
-echo -e "${YELLOW}Configurazione:${NC}"
+# Hostname
+if [ "$HOSTNAME" == "dadude-agent" ]; then
+    suggested_hostname="dadude-agent-$(echo $AGENT_NAME | tr ' ' '-' | tr '[:upper:]' '[:lower:]' | cut -c1-10)"
+    HOSTNAME="$suggested_hostname"
+fi
+
+echo ""
+echo -e "${YELLOW}═══════════════════════════════════════${NC}"
+echo -e "${YELLOW}Riepilogo Configurazione:${NC}"
+echo -e "${YELLOW}═══════════════════════════════════════${NC}"
 echo "  CTID:        $CTID"
 echo "  Hostname:    $HOSTNAME"
+echo "  Agent Name:  $AGENT_NAME"
+echo "  Agent ID:    $AGENT_ID"
 echo "  Storage:     $STORAGE"
 echo "  Memory:      ${MEMORY}MB"
 echo "  Disk:        ${DISK}GB"
-echo "  Network:     $BRIDGE ($IP_CONFIG)"
+echo "  Bridge:      $BRIDGE"
+[ -n "$VLAN" ] && echo "  VLAN:        $VLAN"
+echo "  IP:          $IP_CONFIG"
+[ -n "$GATEWAY" ] && echo "  Gateway:     $GATEWAY"
+echo "  DNS:         $DNS_SERVER"
 echo "  Server URL:  $SERVER_URL"
-echo "  Agent ID:    $AGENT_ID"
 echo ""
 
 # Conferma
@@ -225,6 +294,12 @@ echo -e "${GREEN}Template: $TEMPLATE_PATH${NC}"
 echo -e "${BLUE}[2/6] Creo container LXC...${NC}"
 
 NET_CONFIG="name=eth0,bridge=$BRIDGE"
+
+# Aggiungi VLAN tag se specificato
+if [ -n "$VLAN" ]; then
+    NET_CONFIG="$NET_CONFIG,tag=$VLAN"
+fi
+
 if [ "$IP_CONFIG" != "dhcp" ]; then
     NET_CONFIG="$NET_CONFIG,ip=$IP_CONFIG"
     if [ -n "$GATEWAY" ]; then
