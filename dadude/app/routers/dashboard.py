@@ -24,6 +24,9 @@ templates = Jinja2Templates(directory=templates_dir)
 
 def get_dashboard_data():
     """Raccoglie dati per la dashboard"""
+    from ..models.database import init_db, get_session
+    from ..models.inventory import InventoryDevice
+    
     settings = get_settings()
     settings_service = get_settings_service()
     dude = get_dude_service()
@@ -34,47 +37,100 @@ def get_dashboard_data():
     # Configurazione Dude
     dude_config = settings_service.get_dude_config()
     
-    # Dati dispositivi
-    devices = sync.devices
-    devices_up = len([d for d in devices if d.status.value == "up"])
-    devices_down = len([d for d in devices if d.status.value == "down"])
-    devices_unknown = len([d for d in devices if d.status.value == "unknown"])
-    
-    # Dati probe
-    probes = sync.probes
-    probes_ok = len([p for p in probes if p.status.value == "ok"])
-    probes_warning = len([p for p in probes if p.status.value == "warning"])
-    probes_critical = len([p for p in probes if p.status.value == "critical"])
-    
-    # Dati alert
-    alerts = alert_service.get_alerts(since=datetime.utcnow() - timedelta(hours=24), limit=100)
-    alerts_unack = len([a for a in alerts if not a.acknowledged])
-    
     # Dati clienti
     customers = customer_service.list_customers(active_only=True, limit=1000)
+    
+    # Dati inventario locale
+    try:
+        db_url = settings.database_url.replace("+aiosqlite", "")
+        engine = init_db(db_url)
+        session = get_session(engine)
+        
+        # Conta dispositivi in inventario
+        inventory_total = session.query(InventoryDevice).filter(InventoryDevice.active == True).count()
+        inventory_monitored = session.query(InventoryDevice).filter(
+            InventoryDevice.active == True,
+            InventoryDevice.monitored == True
+        ).count()
+        inventory_online = session.query(InventoryDevice).filter(
+            InventoryDevice.active == True,
+            InventoryDevice.status == 'online'
+        ).count()
+        inventory_offline = session.query(InventoryDevice).filter(
+            InventoryDevice.active == True,
+            InventoryDevice.status == 'offline'
+        ).count()
+        
+        # Conta sonde attive
+        agents = customer_service.list_agents(active_only=True)
+        agents_mikrotik = len([a for a in agents if a.agent_type == 'mikrotik'])
+        agents_docker = len([a for a in agents if a.agent_type == 'docker'])
+        
+        session.close()
+    except Exception as e:
+        logger.warning(f"Errore lettura inventario: {e}")
+        inventory_total = 0
+        inventory_monitored = 0
+        inventory_online = 0
+        inventory_offline = 0
+        agents = []
+        agents_mikrotik = 0
+        agents_docker = 0
+    
+    # Dati The Dude (opzionali)
+    dude_devices = []
+    dude_up = 0
+    dude_down = 0
+    dude_probes_ok = 0
+    dude_probes_warning = 0
+    dude_probes_critical = 0
+    alerts_unack = 0
+    
+    if dude.is_connected:
+        devices = sync.devices
+        dude_up = len([d for d in devices if d.status.value == "up"])
+        dude_down = len([d for d in devices if d.status.value == "down"])
+        dude_devices = devices[:10]
+        
+        probes = sync.probes
+        dude_probes_ok = len([p for p in probes if p.status.value == "ok"])
+        dude_probes_warning = len([p for p in probes if p.status.value == "warning"])
+        dude_probes_critical = len([p for p in probes if p.status.value == "critical"])
+        
+        alerts = alert_service.get_alerts(since=datetime.utcnow() - timedelta(hours=24), limit=100)
+        alerts_unack = len([a for a in alerts if not a.acknowledged])
     
     return {
         "dude_connected": dude.is_connected,
         "dude_host": settings.dude_host,
         "dude_config": dude_config,
         "last_sync": sync.last_sync,
+        # Inventario locale (principale)
+        "inventory": {
+            "total": inventory_total,
+            "monitored": inventory_monitored,
+            "online": inventory_online,
+            "offline": inventory_offline,
+        },
+        "agents": {
+            "total": len(agents) if agents else 0,
+            "mikrotik": agents_mikrotik,
+            "docker": agents_docker,
+        },
+        # The Dude (opzionale)
         "devices": {
-            "total": len(devices),
-            "up": devices_up,
-            "down": devices_down,
-            "unknown": devices_unknown,
-            "list": devices[:20],  # Ultimi 20
+            "total": len(dude_devices),
+            "up": dude_up,
+            "down": dude_down,
+            "list": dude_devices,
         },
         "probes": {
-            "total": len(probes),
-            "ok": probes_ok,
-            "warning": probes_warning,
-            "critical": probes_critical,
+            "ok": dude_probes_ok,
+            "warning": dude_probes_warning,
+            "critical": dude_probes_critical,
         },
         "alerts": {
-            "total_24h": len(alerts),
             "unacknowledged": alerts_unack,
-            "list": alerts[:10],  # Ultimi 10
         },
         "customers": {
             "total": len(customers),

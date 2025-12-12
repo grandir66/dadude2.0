@@ -587,6 +587,8 @@ class CustomerService:
     ) -> Dict[str, Credential]:
         """
         Ottiene le credenziali di default per ogni tipo richiesto.
+        Include sia credenziali del cliente che globali.
+        Priorità: cliente default > cliente non-default > globali default > globali non-default
         
         Args:
             customer_id: ID del cliente
@@ -598,24 +600,33 @@ class CustomerService:
         """
         session = self._get_session()
         try:
-            # Query credenziali attive del cliente
+            # Query credenziali attive del cliente O globali
             query = session.query(CredentialDB).filter(
-                CredentialDB.customer_id == customer_id,
+                or_(
+                    CredentialDB.customer_id == customer_id,
+                    CredentialDB.is_global == True
+                ),
                 CredentialDB.active == True,
             )
             
             if credential_types:
                 query = query.filter(CredentialDB.credential_type.in_(credential_types))
             
-            # Ordina per is_default DESC per avere i default per primi
-            creds = query.order_by(CredentialDB.is_default.desc()).all()
+            # Ordina: priorità cliente, poi default
+            creds = query.order_by(
+                # Credenziali cliente prima delle globali
+                (CredentialDB.customer_id == customer_id).desc(),
+                # Default prima
+                CredentialDB.is_default.desc()
+            ).all()
             
-            # Raggruppa per tipo, prendendo il primo (che è default se esiste)
+            # Raggruppa per tipo, prendendo il primo (che ha priorità più alta)
             result = {}
             for cred in creds:
                 cred_type = cred.credential_type
                 if cred_type not in result:
                     result[cred_type] = self._decrypt_credential(cred)
+                    logger.debug(f"Using credential '{cred.name}' ({cred_type}) - global={cred.is_global}")
             
             return result
             

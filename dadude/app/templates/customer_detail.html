@@ -501,6 +501,7 @@
                                 <th>OS</th>
                                 <th>Vendor</th>
                                 <th>Servizi</th>
+                                <th>Credenziali</th>
                                 <th>Monitoraggio</th>
                                 <th>Stato</th>
                                 <th>Azioni</th>
@@ -2444,6 +2445,14 @@ async function loadInventory() {
                     }
                 }
 
+                // Dropdown credenziali HTML
+                const credSelect = `
+                    <select class="form-select form-select-sm" style="width: 120px; font-size: 0.75rem;" 
+                            onchange="updateDeviceCredential('${dev.id}', this.value)">
+                        ${credOptions}
+                    </select>
+                `;
+
                 tbody.innerHTML += `
                     <tr data-device-id="${dev.id}">
                         <td>
@@ -2456,7 +2465,8 @@ async function loadInventory() {
                         <td><span class="small">${dev.category || '-'}</span></td>
                         <td><span class="small">${dev.os_family || '-'}</span></td>
                         <td><span class="small">${dev.manufacturer || '-'}</span></td>
-                        <td style="min-width: 150px;">${servicesDisplay}</td>
+                        <td style="min-width: 120px;">${servicesDisplay}</td>
+                        <td>${credSelect}</td>
                         <td>${monitoringHtml}</td>
                         <td>${statusBadge}</td>
                         <td>
