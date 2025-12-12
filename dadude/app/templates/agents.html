@@ -262,10 +262,11 @@ async function loadActiveAgents() {
     
     try {
         // Carica tutti gli agent assegnati dai clienti
-        const response = await fetch('/api/v1/customers/');
+        const response = await fetch('/api/v1/customers');
         if (!response.ok) throw new Error('Failed to load customers');
         
-        const customers = await response.json();
+        const data = await response.json();
+        const customers = data.customers || data; // Supporta entrambi i formati
         let allAgents = [];
         
         for (const customer of customers) {
