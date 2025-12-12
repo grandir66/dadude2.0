@@ -6,7 +6,7 @@ FROM python:3.11-slim
 # Metadata
 LABEL maintainer="DaDude Team"
 LABEL description="Network scanning agent for DaDude inventory system"
-LABEL version="1.0.0"
+LABEL version="1.1.0"
 
 # Create app directory
 WORKDIR /app
