@@ -1163,16 +1163,23 @@ async def scan_customer_networks(
     finally:
         session.close()
     
+    # Prepara risposta con formato compatibile con la UI
     return {
         "scan_id": scan_id,
         "agent_id": agent_id,
         "agent_name": agent.name,
         "customer_id": agent.customer_id,
         "scan_type": scan_type,
-        "network_name": network.name,
-        "network_cidr": network.ip_network,
-        "success": scan_result.get("success", False),
-        "devices_found": scan_result.get("devices_found", 0),
+        "networks_scanned": 1,
+        "results": [{
+            "network_id": network.id,
+            "network_name": network.name,
+            "network_cidr": network.ip_network,
+            "success": scan_result.get("success", False),
+            "devices_found": scan_result.get("devices_found", 0),
+            "devices": scan_result.get("results", []),  # Includi i dispositivi!
+            "error": scan_result.get("error"),
+        }],
         "message": scan_result.get("message", ""),
         "view_url": f"/customers/{agent.customer_id}/scans/{scan_id}" if scan_id else None
     }
