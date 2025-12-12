@@ -524,7 +524,7 @@ class AgentAssignmentUpdate(BaseModel):
 class AgentAssignment(AgentAssignmentBase):
     """Schema sonda completo"""
     id: str
-    customer_id: str
+    customer_id: Optional[str] = None  # Nullable per agent in attesa di approvazione
     dude_agent_id: Optional[str] = None
     status: str = "unknown"
     last_seen: Optional[datetime] = None
@@ -540,7 +540,7 @@ class AgentAssignment(AgentAssignmentBase):
 class AgentAssignmentSafe(BaseModel):
     """Schema sonda senza password, token e chiave SSH"""
     id: str
-    customer_id: str
+    customer_id: Optional[str] = None  # Nullable per agent in attesa di approvazione
     name: str
     address: str
     port: Optional[int] = 8728
