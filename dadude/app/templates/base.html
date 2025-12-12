@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - DaDude</title>
+    
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    
+    <style>
+        :root {
+            --sidebar-width: 250px;
+            --primary-color: #2563eb;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+        }
+        
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background-color: #f1f5f9;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            width: var(--sidebar-width);
+            background: linear-gradient(180deg, #1e3a5f 0%, #0f172a 100%);
+            padding: 1rem;
+            z-index: 1000;
+        }
+        
+        .sidebar .logo {
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .sidebar .logo i {
+            color: #60a5fa;
+        }
+        
+        .sidebar .nav-link {
+            color: rgba(255,255,255,0.7);
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 0.25rem;
+            transition: all 0.2s;
+        }
+        
+        .sidebar .nav-link:hover {
+            color: white;
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .sidebar .nav-link.active {
+            color: white;
+            background: var(--primary-color);
+        }
+        
+        .sidebar .nav-link i {
+            margin-right: 0.75rem;
+            width: 20px;
+        }
+        
+        /* Main content */
+        .main-content {
+            margin-left: var(--sidebar-width);
+            padding: 2rem;
+            min-height: 100vh;
+        }
+        
+        /* Cards */
+        .stat-card {
+            background: white;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-2px);
+        }
+        
+        .stat-card .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+        
+        .stat-card .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+        
+        .stat-card .stat-label {
+            color: #64748b;
+            font-size: 0.875rem;
+        }
+        
+        /* Status badges */
+        .badge-up { background-color: var(--success-color); }
+        .badge-down { background-color: var(--danger-color); }
+        .badge-warning { background-color: var(--warning-color); }
+        .badge-unknown { background-color: #94a3b8; }
+        
+        /* Tables */
+        .table-modern {
+            background: white;
+            border-radius: 1rem;
+            overflow: hidden;
+        }
+        
+        .table-modern th {
+            background: #f8fafc;
+            font-weight: 600;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+        }
+        
+        /* Connection status */
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-dot.connected { background-color: var(--success-color); }
+        .status-dot.disconnected { background-color: var(--danger-color); }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Charts */
+        .chart-container {
+            background: white;
+            border-radius: 1rem;
+            padding: 1.5rem;
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <!-- Sidebar -->
+    <nav class="sidebar">
+        <div class="logo">
+            <i class="bi bi-hdd-network"></i> DaDude
+        </div>
+        
+        <ul class="nav flex-column">
+            <li class="nav-item">
+                <a class="nav-link {% if page == 'dashboard' %}active{% endif %}" href="/dashboard">
+                    <i class="bi bi-speedometer2"></i> Dashboard
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if page == 'devices' %}active{% endif %}" href="/devices">
+                    <i class="bi bi-router"></i> Dispositivi
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if page == 'alerts' %}active{% endif %}" href="/alerts">
+                    <i class="bi bi-bell"></i> Alert
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if page == 'customers' %}active{% endif %}" href="/customers">
+                    <i class="bi bi-people"></i> Clienti
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if page == 'discovery' %}active{% endif %}" href="/discovery">
+                    <i class="bi bi-search"></i> Discovery
+                </a>
+            </li>
+            
+            <li class="nav-item mt-4">
+                <small class="text-muted px-3">CONFIGURAZIONE</small>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link {% if page == 'settings' %}active{% endif %}" href="/settings">
+                    <i class="bi bi-gear"></i> Impostazioni
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="/settings/webhooks">
+                    <i class="bi bi-link-45deg"></i> Webhook
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="/settings/import-export">
+                    <i class="bi bi-arrow-left-right"></i> Import/Export
+                </a>
+            </li>
+            
+            <li class="nav-item mt-4">
+                <small class="text-muted px-3">API</small>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="/docs" target="_blank">
+                    <i class="bi bi-code-slash"></i> API Docs
+                </a>
+            </li>
+        </ul>
+    </nav>
+    
+    <!-- Main Content -->
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+    
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

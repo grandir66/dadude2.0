@@ -1,0 +1,55 @@
+# DaDude - Docker Compose Configuration
+# =====================================
+
+version: "3.8"
+
+services:
+  dadude:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dadude
+    restart: unless-stopped
+    ports:
+      - "${DADUDE_PORT:-8000}:8000"
+    environment:
+      # Dude Server
+      - DUDE_HOST=${DUDE_HOST:-192.168.1.1}
+      - DUDE_API_PORT=${DUDE_API_PORT:-8728}
+      - DUDE_USE_SSL=${DUDE_USE_SSL:-false}
+      - DUDE_USERNAME=${DUDE_USERNAME:-admin}
+      - DUDE_PASSWORD=${DUDE_PASSWORD:-}
+      # DaDude
+      - DADUDE_HOST=0.0.0.0
+      - DADUDE_PORT=8000
+      - DADUDE_API_KEY=${DADUDE_API_KEY:-}
+      # Polling
+      - POLL_INTERVAL=${POLL_INTERVAL:-60}
+      - FULL_SYNC_INTERVAL=${FULL_SYNC_INTERVAL:-300}
+      - CONNECTION_TIMEOUT=${CONNECTION_TIMEOUT:-30}
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Webhook
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+    volumes:
+      - dadude_data:/app/data
+      - dadude_logs:/app/logs
+    networks:
+      - dadude_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  dadude_data:
+    driver: local
+  dadude_logs:
+    driver: local
+
+networks:
+  dadude_network:
+    driver: bridge

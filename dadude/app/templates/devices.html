@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-1">Dispositivi</h1>
+        <p class="text-muted mb-0">{{ devices|length }} dispositivi totali</p>
+    </div>
+    <div class="btn-group">
+        <a href="/devices" class="btn btn-outline-secondary {% if not status_filter %}active{% endif %}">Tutti</a>
+        <a href="/devices?status=up" class="btn btn-outline-success {% if status_filter == 'up' %}active{% endif %}">UP</a>
+        <a href="/devices?status=down" class="btn btn-outline-danger {% if status_filter == 'down' %}active{% endif %}">DOWN</a>
+    </div>
+</div>
+
+<div class="card table-modern">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Stato</th>
+                    <th>Nome</th>
+                    <th>Indirizzo IP</th>
+                    <th>MAC Address</th>
+                    <th>Tipo</th>
+                    <th>Gruppo</th>
+                    <th>Ultimo Contatto</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for device in devices %}
+                <tr>
+                    <td>
+                        {% if device.status.value == 'up' %}
+                        <span class="badge bg-success"><i class="bi bi-check-circle"></i> UP</span>
+                        {% elif device.status.value == 'down' %}
+                        <span class="badge bg-danger"><i class="bi bi-x-circle"></i> DOWN</span>
+                        {% else %}
+                        <span class="badge bg-secondary"><i class="bi bi-question-circle"></i> {{ device.status.value|upper }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <strong>{{ device.name }}</strong>
+                    </td>
+                    <td><code>{{ device.address or '-' }}</code></td>
+                    <td><code class="text-muted">{{ device.mac_address or '-' }}</code></td>
+                    <td>{{ device.device_type or '-' }}</td>
+                    <td>{{ device.group or '-' }}</td>
+                    <td>
+                        {% if device.last_seen %}
+                        {{ device.last_seen.strftime('%d/%m %H:%M') }}
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center text-muted py-5">
+                        <i class="bi bi-inbox display-4 d-block mb-2"></i>
+                        Nessun dispositivo trovato
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

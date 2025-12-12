@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+ENV/
+.env
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Keys and secrets
+*.pem
+*.key
+encryption.key
+
+# Build
+*.tar.gz
+dist/
+build/
+*.egg-info/
+
+# Config secrets
+dadude/data/
+dadude-agent/config/config.json
+
+# Test
+.coverage
+htmlcov/
+.pytest_cache/
+
+DA-inventory/

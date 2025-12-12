@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-1">Clienti</h1>
+        <p class="text-muted mb-0">{{ customers|length }} clienti</p>
+    </div>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newCustomerModal">
+        <i class="bi bi-plus-lg"></i> Nuovo Cliente
+    </button>
+</div>
+
+<div class="card table-modern">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th>Codice</th>
+                    <th>Nome</th>
+                    <th>Contatto</th>
+                    <th>Email</th>
+                    <th>Telefono</th>
+                    <th>Stato</th>
+                    <th>Azioni</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for customer in customers %}
+                <tr>
+                    <td><code class="fw-bold">{{ customer.code }}</code></td>
+                    <td>
+                        <a href="/customers/{{ customer.id }}" class="text-decoration-none">
+                            <strong>{{ customer.name }}</strong>
+                        </a>
+                    </td>
+                    <td>{{ customer.contact_name or '-' }}</td>
+                    <td>
+                        {% if customer.contact_email %}
+                        <a href="mailto:{{ customer.contact_email }}">{{ customer.contact_email }}</a>
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td>{{ customer.contact_phone or '-' }}</td>
+                    <td>
+                        {% if customer.active %}
+                        <span class="badge bg-success">Attivo</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Inattivo</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="/customers/{{ customer.id }}" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-eye"></i>
+                        </a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" class="text-center text-muted py-5">
+                        <i class="bi bi-people display-4 d-block mb-2"></i>
+                        Nessun cliente configurato
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Modal Nuovo Cliente -->
+<div class="modal fade" id="newCustomerModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nuovo Cliente</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="newCustomerForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Codice Cliente *</label>
+                        <input type="text" class="form-control" name="code" required 
+                               pattern="[A-Za-z0-9_-]+" placeholder="ES: ACME001">
+                        <small class="text-muted">Solo lettere, numeri, _ e -</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nome *</label>
+                        <input type="text" class="form-control" name="name" required placeholder="Acme Corporation">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Descrizione</label>
+                        <textarea class="form-control" name="description" rows="2"></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Nome Contatto</label>
+                            <input type="text" class="form-control" name="contact_name">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Email Contatto</label>
+                            <input type="email" class="form-control" name="contact_email">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Telefono</label>
+                        <input type="text" class="form-control" name="contact_phone">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary">Crea Cliente</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('newCustomerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const formData = new FormData(e.target);
+    const data = Object.fromEntries(formData.entries());
+    
+    try {
+        const response = await fetch('/api/v1/customers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const error = await response.json();
+            alert('Errore: ' + (error.detail || 'Errore sconosciuto'));
+        }
+    } catch (e) {
+        alert('Errore di connessione');
+    }
+});
+</script>
+{% endblock %}

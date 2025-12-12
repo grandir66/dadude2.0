@@ -1,0 +1,450 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-1">Dashboard</h1>
+        <div class="connection-status">
+            <span class="status-dot {% if dude_connected %}connected{% else %}disconnected{% endif %}"></span>
+            <span class="text-muted">
+                {% if dude_connected %}
+                    Connesso a {{ dude_host }}
+                {% else %}
+                    Disconnesso
+                {% endif %}
+            </span>
+            {% if last_sync %}
+            <span class="text-muted ms-2">
+                <i class="bi bi-clock"></i> Ultimo sync: {{ last_sync.strftime('%H:%M:%S') }}
+            </span>
+            {% endif %}
+        </div>
+    </div>
+    <button class="btn btn-primary" onclick="location.reload()">
+        <i class="bi bi-arrow-clockwise"></i> Aggiorna
+    </button>
+</div>
+
+{% if not dude_connected %}
+<!-- Connection Setup Card -->
+<div class="row justify-content-center mb-4">
+    <div class="col-lg-8">
+        <div class="card border-warning">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> Configurazione Connessione Dude Server
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-4">
+                    Per utilizzare DaDude è necessario configurare la connessione al server MikroTik The Dude.
+                    Inserisci le credenziali API del router/server dove è installato The Dude.
+                </p>
+                
+                <form id="dudeConfigForm">
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <label class="form-label">Host / IP Address <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="dudeHost" name="host" 
+                                   value="{{ dude_config.host }}" placeholder="192.168.1.1" required>
+                            <div class="form-text">Indirizzo IP o hostname del server The Dude</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Porta API</label>
+                            <input type="number" class="form-control" id="dudePort" name="port" 
+                                   value="{{ dude_config.port }}" placeholder="8728">
+                            <div class="form-text">Default: 8728 (8729 per SSL)</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Username <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="dudeUsername" name="username" 
+                                   value="{{ dude_config.username }}" placeholder="admin" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Password <span class="text-danger">*</span></label>
+                            <input type="password" class="form-control" id="dudePassword" name="password" 
+                                   value="{{ dude_config.password }}" placeholder="••••••••" required>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="dudeSSL" name="use_ssl"
+                                       {% if dude_config.use_ssl %}checked{% endif %}>
+                                <label class="form-check-label" for="dudeSSL">
+                                    Usa connessione SSL/TLS (porta 8729)
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4 d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary" onclick="testConnection()">
+                            <i class="bi bi-plug"></i> Test Connessione
+                        </button>
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-save"></i> Salva e Connetti
+                        </button>
+                    </div>
+                </form>
+                
+                <div id="connectionResult" class="mt-3" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Stats Cards -->
+<div class="row g-4 mb-4">
+    <!-- Dispositivi UP -->
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value text-success">{{ devices.up }}</div>
+                    <div class="stat-label">Dispositivi UP</div>
+                </div>
+                <div class="stat-icon bg-success bg-opacity-10 text-success">
+                    <i class="bi bi-check-circle"></i>
+                </div>
+            </div>
+            <div class="progress mt-3" style="height: 4px;">
+                <div class="progress-bar bg-success" style="width: {{ (devices.up / devices.total * 100) if devices.total > 0 else 0 }}%"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Dispositivi DOWN -->
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value text-danger">{{ devices.down }}</div>
+                    <div class="stat-label">Dispositivi DOWN</div>
+                </div>
+                <div class="stat-icon bg-danger bg-opacity-10 text-danger">
+                    <i class="bi bi-x-circle"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Alert -->
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value text-warning">{{ alerts.unacknowledged }}</div>
+                    <div class="stat-label">Alert da gestire</div>
+                </div>
+                <div class="stat-icon bg-warning bg-opacity-10 text-warning">
+                    <i class="bi bi-bell"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Clienti -->
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value text-primary">{{ customers.total }}</div>
+                    <div class="stat-label">Clienti Attivi</div>
+                </div>
+                <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+                    <i class="bi bi-people"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="row g-4 mb-4">
+    <!-- Dispositivi Chart -->
+    <div class="col-md-6">
+        <div class="chart-container">
+            <h5 class="mb-3">Stato Dispositivi</h5>
+            <canvas id="devicesChart" height="200"></canvas>
+        </div>
+    </div>
+    
+    <!-- Probe Chart -->
+    <div class="col-md-6">
+        <div class="chart-container">
+            <h5 class="mb-3">Stato Probe</h5>
+            <canvas id="probesChart" height="200"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Tables Row -->
+<div class="row g-4">
+    <!-- Dispositivi DOWN -->
+    <div class="col-md-6">
+        <div class="card table-modern">
+            <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-exclamation-triangle text-danger"></i> Dispositivi DOWN
+                </h5>
+                <a href="/devices?status=down" class="btn btn-sm btn-outline-danger">Vedi tutti</a>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Nome</th>
+                            <th>Indirizzo</th>
+                            <th>Tipo</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for device in devices.list if device.status.value == 'down' %}
+                        <tr>
+                            <td>
+                                <i class="bi bi-router text-danger"></i>
+                                {{ device.name }}
+                            </td>
+                            <td><code>{{ device.address or '-' }}</code></td>
+                            <td>{{ device.device_type or '-' }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="3" class="text-center text-muted py-4">
+                                <i class="bi bi-check-circle text-success"></i> Nessun dispositivo DOWN
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Alert Recenti -->
+    <div class="col-md-6">
+        <div class="card table-modern">
+            <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-bell text-warning"></i> Alert Recenti
+                </h5>
+                <a href="/alerts" class="btn btn-sm btn-outline-warning">Vedi tutti</a>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Severità</th>
+                            <th>Device</th>
+                            <th>Messaggio</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for alert in alerts.list %}
+                        <tr>
+                            <td>
+                                {% if alert.severity == 'critical' %}
+                                <span class="badge bg-danger">Critico</span>
+                                {% elif alert.severity == 'warning' %}
+                                <span class="badge bg-warning">Warning</span>
+                                {% else %}
+                                <span class="badge bg-info">Info</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ alert.device_name }}</td>
+                            <td class="text-truncate" style="max-width: 200px;">{{ alert.message }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="3" class="text-center text-muted py-4">
+                                Nessun alert recente
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Clienti Recenti -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card table-modern">
+            <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-people text-primary"></i> Clienti
+                </h5>
+                <a href="/customers" class="btn btn-sm btn-outline-primary">Vedi tutti</a>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th>Codice</th>
+                            <th>Nome</th>
+                            <th>Contatto</th>
+                            <th>Email</th>
+                            <th>Stato</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for customer in customers.list %}
+                        <tr onclick="location.href='/customers/{{ customer.id }}'" style="cursor: pointer;">
+                            <td><code>{{ customer.code }}</code></td>
+                            <td><strong>{{ customer.name }}</strong></td>
+                            <td>{{ customer.contact_name or '-' }}</td>
+                            <td>{{ customer.contact_email or '-' }}</td>
+                            <td>
+                                {% if customer.active %}
+                                <span class="badge bg-success">Attivo</span>
+                                {% else %}
+                                <span class="badge bg-secondary">Inattivo</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="text-center text-muted py-4">
+                                Nessun cliente configurato
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Devices Chart
+new Chart(document.getElementById('devicesChart'), {
+    type: 'doughnut',
+    data: {
+        labels: ['UP', 'DOWN', 'Unknown'],
+        datasets: [{
+            data: [{{ devices.up }}, {{ devices.down }}, {{ devices.unknown }}],
+            backgroundColor: ['#10b981', '#ef4444', '#94a3b8'],
+            borderWidth: 0,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                position: 'bottom'
+            }
+        },
+        cutout: '60%'
+    }
+});
+
+// Probes Chart
+new Chart(document.getElementById('probesChart'), {
+    type: 'doughnut',
+    data: {
+        labels: ['OK', 'Warning', 'Critical'],
+        datasets: [{
+            data: [{{ probes.ok }}, {{ probes.warning }}, {{ probes.critical }}],
+            backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+            borderWidth: 0,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                position: 'bottom'
+            }
+        },
+        cutout: '60%'
+    }
+});
+
+// Dude Config Form
+async function testConnection() {
+    const resultDiv = document.getElementById('connectionResult');
+    resultDiv.style.display = 'block';
+    resultDiv.className = 'mt-3 alert alert-info';
+    resultDiv.innerHTML = '<i class="bi bi-hourglass-split"></i> Test connessione in corso...';
+    
+    const formData = {
+        host: document.getElementById('dudeHost').value,
+        port: parseInt(document.getElementById('dudePort').value) || 8728,
+        username: document.getElementById('dudeUsername').value,
+        password: document.getElementById('dudePassword').value,
+        use_ssl: document.getElementById('dudeSSL').checked
+    };
+    
+    try {
+        const response = await fetch('/api/v1/system/test-connection', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(formData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            resultDiv.className = 'mt-3 alert alert-success';
+            resultDiv.innerHTML = '<i class="bi bi-check-circle"></i> Connessione riuscita! Server: ' + (result.server_info || 'OK');
+        } else {
+            resultDiv.className = 'mt-3 alert alert-danger';
+            resultDiv.innerHTML = '<i class="bi bi-x-circle"></i> Connessione fallita: ' + (result.error || 'Errore sconosciuto');
+        }
+    } catch (error) {
+        resultDiv.className = 'mt-3 alert alert-danger';
+        resultDiv.innerHTML = '<i class="bi bi-x-circle"></i> Errore: ' + error.message;
+    }
+}
+
+document.getElementById('dudeConfigForm')?.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const resultDiv = document.getElementById('connectionResult');
+    resultDiv.style.display = 'block';
+    resultDiv.className = 'mt-3 alert alert-info';
+    resultDiv.innerHTML = '<i class="bi bi-hourglass-split"></i> Salvataggio configurazione...';
+    
+    const formData = {
+        host: document.getElementById('dudeHost').value,
+        port: parseInt(document.getElementById('dudePort').value) || 8728,
+        username: document.getElementById('dudeUsername').value,
+        password: document.getElementById('dudePassword').value,
+        use_ssl: document.getElementById('dudeSSL').checked
+    };
+    
+    try {
+        const response = await fetch('/api/v1/system/dude-config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(formData)
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            resultDiv.className = 'mt-3 alert alert-success';
+            resultDiv.innerHTML = '<i class="bi bi-check-circle"></i> Configurazione salvata! Ricarico...';
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            resultDiv.className = 'mt-3 alert alert-danger';
+            resultDiv.innerHTML = '<i class="bi bi-x-circle"></i> Errore: ' + (result.detail || 'Errore sconosciuto');
+        }
+    } catch (error) {
+        resultDiv.className = 'mt-3 alert alert-danger';
+        resultDiv.innerHTML = '<i class="bi bi-x-circle"></i> Errore: ' + error.message;
+    }
+});
+
+// Auto-refresh ogni 60 secondi (solo se connesso)
+{% if dude_connected %}
+setTimeout(() => location.reload(), 60000);
+{% endif %}
+</script>
+{% endblock %}

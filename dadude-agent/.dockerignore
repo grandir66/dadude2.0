@@ -1,0 +1,9 @@
+.git
+__pycache__
+*.pyc
+.venv
+venv
+*.tar.gz
+.idea
+.vscode
+

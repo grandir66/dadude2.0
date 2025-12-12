@@ -1,0 +1,1658 @@
+"""
+DaDude - Device Probe Service
+Identifica tipo dispositivo tramite SSH, SNMP, WMI
+Supporta esecuzione tramite agente MikroTik remoto
+"""
+from typing import Optional, Dict, Any, List
+from loguru import logger
+import asyncio
+import socket
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from enum import Enum
+from .mac_lookup_service import get_mac_lookup_service
+
+
+class ProbeProtocol(Enum):
+    SSH = "ssh"
+    SNMP = "snmp"
+    WMI = "wmi"
+    MIKROTIK_API = "mikrotik_api"
+    HTTP = "http"
+    HTTPS = "https"
+
+
+@dataclass
+class ProbeResult:
+    """Risultato di un probe"""
+    success: bool
+    protocol: str
+    device_type: Optional[str] = None
+    category: Optional[str] = None
+    os_family: Optional[str] = None
+    os_version: Optional[str] = None
+    hostname: Optional[str] = None
+    model: Optional[str] = None
+    extra_info: Optional[Dict] = None
+    error: Optional[str] = None
+
+
+@dataclass
+class MikroTikAgent:
+    """
+    Rappresenta un agente MikroTik per operazioni remote.
+    Tutte le operazioni di rete (port scan, DNS, ping) possono essere eseguite
+    tramite questo agente invece che dalla macchina locale.
+    """
+    address: str
+    username: str
+    password: str
+    port: int = 22  # SSH port
+    api_port: int = 8728
+    use_ssl: bool = False
+    dns_server: Optional[str] = None  # DNS server da usare per le query
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "address": self.address,
+            "username": self.username,
+            "password": self.password,
+            "port": self.port,
+            "api_port": self.api_port,
+            "use_ssl": self.use_ssl,
+            "dns_server": self.dns_server,
+        }
+
+
+class DeviceProbeService:
+    """Servizio per identificare dispositivi tramite probe attivi"""
+    
+    def __init__(self):
+        self._executor = ThreadPoolExecutor(max_workers=10)
+    
+    async def probe_device(
+        self,
+        address: str,
+        credentials: Dict[str, Any],
+        protocols: List[str] = None
+    ) -> List[ProbeResult]:
+        """
+        Esegue probe su un dispositivo con le credenziali fornite.
+        
+        Args:
+            address: IP del dispositivo
+            credentials: Dict con username, password, snmp_community, etc
+            protocols: Lista protocolli da provare (default: tutti applicabili)
+            
+        Returns:
+            Lista di ProbeResult per ogni protocollo testato
+        """
+        if protocols is None:
+            protocols = ["mikrotik_api", "ssh", "snmp", "wmi"]
+        
+        results = []
+        
+        for protocol in protocols:
+            try:
+                if protocol == "mikrotik_api":
+                    result = await self._probe_mikrotik_api(address, credentials)
+                elif protocol == "ssh":
+                    result = await self._probe_ssh(address, credentials)
+                elif protocol == "snmp":
+                    result = await self._probe_snmp(address, credentials)
+                elif protocol == "wmi":
+                    result = await self._probe_wmi(address, credentials)
+                else:
+                    continue
+                
+                results.append(result)
+                
+                # Se trovato, possiamo fermarci
+                if result.success and result.device_type:
+                    break
+                    
+            except Exception as e:
+                logger.error(f"Probe {protocol} failed for {address}: {e}")
+                results.append(ProbeResult(
+                    success=False,
+                    protocol=protocol,
+                    error=str(e)
+                ))
+        
+        return results
+    
+    async def _probe_mikrotik_api(self, address: str, credentials: Dict) -> ProbeResult:
+        """Probe via RouterOS API"""
+        try:
+            import routeros_api
+
+            username = credentials.get("username", "admin")
+            password = credentials.get("password", "")
+            # Fix: supporta sia api_port che mikrotik_api_port
+            port = credentials.get("mikrotik_api_port") or credentials.get("api_port", 8728)
+
+            logger.debug(f"Attempting MikroTik API probe on {address}:{port} with user {username}")
+            
+            # Test connessione
+            loop = asyncio.get_event_loop()
+            
+            def connect():
+                # Timeout impostato a 10 secondi
+                import socket
+                default_timeout = socket.getdefaulttimeout()
+                socket.setdefaulttimeout(10.0)
+
+                try:
+                    connection = routeros_api.RouterOsApiPool(
+                        address,
+                        username=username,
+                        password=password,
+                        port=port,
+                        plaintext_login=True
+                    )
+                    api = connection.get_api()
+
+                    # Get identity
+                    identity = api.get_resource('/system/identity').get()[0]['name']
+
+                    # Get resource info
+                    resource = api.get_resource('/system/resource').get()[0]
+
+                    # Get routerboard info
+                    try:
+                        rb = api.get_resource('/system/routerboard').get()[0]
+                        board_name = rb.get('board-name', '')
+                        model = rb.get('model', '')
+                        serial = rb.get('serial-number', '')
+                    except:
+                        board_name = ""
+                        model = ""
+                        serial = ""
+
+                    connection.disconnect()
+
+                    return {
+                        "identity": identity,
+                        "version": resource.get("version", ""),
+                        "board_name": board_name or resource.get("board-name", ""),
+                        "model": model,
+                        "platform": resource.get("platform", ""),
+                        "cpu": resource.get("cpu", ""),
+                        "architecture": resource.get("architecture-name", ""),
+                        "memory_total_mb": int(resource.get("total-memory", 0)) // (1024*1024),
+                        "disk_total_mb": int(resource.get("total-hdd-space", 0)) // (1024*1024),
+                        "serial_number": serial
+                    }
+                finally:
+                    socket.setdefaulttimeout(default_timeout)
+            
+            info = await loop.run_in_executor(self._executor, connect)
+
+            logger.success(f"MikroTik probe successful for {address}: {info.get('identity')}")
+            return ProbeResult(
+                success=True,
+                protocol="mikrotik_api",
+                device_type="mikrotik",
+                category="router",
+                os_family="RouterOS",
+                os_version=info.get("version"),
+                hostname=info.get("identity"),
+                model=info.get("board_name") or info.get("model"),
+                extra_info=info
+            )
+
+        except Exception as e:
+            logger.error(f"MikroTik API probe failed for {address}:{port} - {type(e).__name__}: {str(e)}")
+            return ProbeResult(
+                success=False,
+                protocol="mikrotik_api",
+                error=str(e)
+            )
+    
+    async def _probe_ssh(self, address: str, credentials: Dict) -> ProbeResult:
+        """Probe via SSH - identifica Linux/Unix"""
+        try:
+            import paramiko
+
+            username = credentials.get("username", "root")
+            password = credentials.get("password")
+            ssh_key = credentials.get("ssh_private_key") or credentials.get("ssh_key")
+            port = credentials.get("ssh_port", 22)
+
+            logger.debug(f"Attempting SSH probe on {address}:{port} with user {username}")
+            loop = asyncio.get_event_loop()
+            
+            def connect():
+                client = paramiko.SSHClient()
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+                connect_kwargs = {
+                    "hostname": address,
+                    "port": port,
+                    "username": username,
+                    "timeout": 10,
+                    "banner_timeout": 10,
+                    "auth_timeout": 10,
+                    "allow_agent": False,
+                    "look_for_keys": False,
+                }
+
+                if ssh_key:
+                    import io
+                    # Supporta diversi tipi di chiavi
+                    try:
+                        key = paramiko.RSAKey.from_private_key(io.StringIO(ssh_key))
+                    except:
+                        try:
+                            key = paramiko.Ed25519Key.from_private_key(io.StringIO(ssh_key))
+                        except:
+                            key = paramiko.ECDSAKey.from_private_key(io.StringIO(ssh_key))
+                    connect_kwargs["pkey"] = key
+                elif password:
+                    connect_kwargs["password"] = password
+                else:
+                    raise ValueError("SSH credentials require either password or private key")
+
+                client.connect(**connect_kwargs)
+                
+                info = {}
+                
+                # Get hostname
+                stdin, stdout, stderr = client.exec_command("hostname", timeout=5)
+                info["hostname"] = stdout.read().decode().strip()
+                
+                # Try to identify OS
+                stdin, stdout, stderr = client.exec_command("cat /etc/os-release 2>/dev/null || cat /etc/redhat-release 2>/dev/null", timeout=5)
+                os_info = stdout.read().decode()
+                
+                if "Ubuntu" in os_info:
+                    info["os_family"] = "Ubuntu"
+                    info["device_type"] = "linux"
+                elif "Debian" in os_info:
+                    info["os_family"] = "Debian"
+                    info["device_type"] = "linux"
+                elif "CentOS" in os_info or "Red Hat" in os_info:
+                    info["os_family"] = "RHEL"
+                    info["device_type"] = "linux"
+                elif "Alpine" in os_info:
+                    info["os_family"] = "Alpine"
+                    info["device_type"] = "linux"
+                elif "Proxmox" in os_info:
+                    info["os_family"] = "Proxmox"
+                    info["device_type"] = "linux"
+                    info["category"] = "hypervisor"
+                else:
+                    # Check if RouterOS via SSH
+                    stdin, stdout, stderr = client.exec_command("/system resource print", timeout=5)
+                    ros_out = stdout.read().decode()
+                    if "routeros" in ros_out.lower() or "uptime" in ros_out.lower():
+                        info["os_family"] = "RouterOS"
+                        info["device_type"] = "mikrotik"
+                        info["category"] = "router"
+                    else:
+                        info["os_family"] = "Linux"
+                        info["device_type"] = "linux"
+                
+                # Get kernel version
+                stdin, stdout, stderr = client.exec_command("uname -r", timeout=5)
+                info["kernel"] = stdout.read().decode().strip()
+                
+                # Get architecture
+                stdin, stdout, stderr = client.exec_command("uname -m", timeout=5)
+                info["arch"] = stdout.read().decode().strip()
+                
+                # Get Memory
+                try:
+                    stdin, stdout, stderr = client.exec_command("free -m | grep Mem | awk '{print $2}'", timeout=5)
+                    mem_out = stdout.read().decode().strip()
+                    if mem_out.isdigit():
+                         info["memory_total_mb"] = int(mem_out)
+                except:
+                    pass
+
+                # Get CPU Cores
+                try:
+                    stdin, stdout, stderr = client.exec_command("nproc", timeout=5)
+                    cpu_out = stdout.read().decode().strip()
+                    if cpu_out.isdigit():
+                        info["cpu_cores"] = int(cpu_out)
+                except:
+                    pass
+                
+                # Get Disk
+                try:
+                    stdin, stdout, stderr = client.exec_command("df -BG / | awk 'NR==2 {print $2, $4}'", timeout=5)
+                    disk_out = stdout.read().decode().strip().split()
+                    if len(disk_out) == 2:
+                        info["disk_total_gb"] = int(disk_out[0].replace('G', ''))
+                        info["disk_free_gb"] = int(disk_out[1].replace('G', ''))
+                except:
+                    pass
+
+                client.close()
+                return info
+            
+            info = await loop.run_in_executor(self._executor, connect)
+
+            logger.success(f"SSH probe successful for {address}: {info.get('hostname')} ({info.get('os_family')})")
+            return ProbeResult(
+                success=True,
+                protocol="ssh",
+                device_type=info.get("device_type", "linux"),
+                category=info.get("category", "server"),
+                os_family=info.get("os_family"),
+                os_version=info.get("kernel"),
+                hostname=info.get("hostname"),
+                extra_info=info
+            )
+
+        except Exception as e:
+            logger.error(f"SSH probe failed for {address}:{port} - {type(e).__name__}: {str(e)}")
+            return ProbeResult(
+                success=False,
+                protocol="ssh",
+                error=str(e)
+            )
+    
+    async def _probe_snmp(self, address: str, credentials: Dict) -> ProbeResult:
+        """Probe via SNMP - identifica dispositivi di rete"""
+        try:
+            # pysnmp v7 API - usa modulo asyncio
+            from pysnmp.hlapi.v1arch.asyncio import (
+                get_cmd, SnmpDispatcher, CommunityData, UdpTransportTarget,
+                ObjectType, ObjectIdentity
+            )
+
+            community = credentials.get("snmp_community", "public")
+            port = int(credentials.get("snmp_port", 161))
+            version = credentials.get("snmp_version", "2c")
+
+            logger.debug(f"Attempting SNMP probe on {address}:{port} with community '{community}' (v{version})")
+
+            # OIDs per identificazione dispositivo
+            # Standard MIB-II
+            oids_basic = {
+                "sysDescr": "1.3.6.1.2.1.1.1.0",
+                "sysName": "1.3.6.1.2.1.1.5.0",
+                "sysObjectID": "1.3.6.1.2.1.1.2.0",
+                "sysContact": "1.3.6.1.2.1.1.4.0",
+                "sysLocation": "1.3.6.1.2.1.1.6.0",
+                "sysUpTime": "1.3.6.1.2.1.1.3.0",
+            }
+            
+            # Entity MIB (RFC 4133) - modello, seriale, vendor
+            oids_entity = {
+                "entPhysicalDescr": "1.3.6.1.2.1.47.1.1.1.1.2.1",       # Descrizione hardware
+                "entPhysicalVendorType": "1.3.6.1.2.1.47.1.1.1.1.3.1",  # Tipo vendor
+                "entPhysicalName": "1.3.6.1.2.1.47.1.1.1.1.7.1",        # Nome modello
+                "entPhysicalHardwareRev": "1.3.6.1.2.1.47.1.1.1.1.8.1", # Revisione HW
+                "entPhysicalFirmwareRev": "1.3.6.1.2.1.47.1.1.1.1.9.1", # Revisione FW
+                "entPhysicalSoftwareRev": "1.3.6.1.2.1.47.1.1.1.1.10.1",# Revisione SW
+                "entPhysicalSerialNum": "1.3.6.1.2.1.47.1.1.1.1.11.1",  # Seriale
+                "entPhysicalMfgName": "1.3.6.1.2.1.47.1.1.1.1.12.1",    # Manufacturer
+                "entPhysicalModelName": "1.3.6.1.2.1.47.1.1.1.1.13.1",  # Modello
+            }
+            
+            # OID specifici per vendor comuni
+            oids_vendor_specific = {
+                # Cisco
+                "ciscoSerial": "1.3.6.1.4.1.9.3.6.3.0",
+                # HP/ProCurve
+                "hpSerial": "1.3.6.1.4.1.11.2.36.1.1.2.9.0",
+                # Ubiquiti
+                "ubntModel": "1.3.6.1.4.1.41112.1.6.3.3.0",
+                "ubntVersion": "1.3.6.1.4.1.41112.1.6.3.6.0",
+                # Synology
+                "synoModel": "1.3.6.1.4.1.6574.1.5.1.0",
+                "synoSerial": "1.3.6.1.4.1.6574.1.5.2.0",
+                # QNAP
+                "qnapModel": "1.3.6.1.4.1.24681.1.2.12.0",
+                "qnapSerial": "1.3.6.1.4.1.24681.1.2.13.0",
+                # APC UPS
+                "apcModel": "1.3.6.1.4.1.318.1.1.1.1.1.1.0",
+                "apcSerial": "1.3.6.1.4.1.318.1.1.1.1.2.3.0",
+                "apcFirmware": "1.3.6.1.4.1.318.1.1.1.1.2.1.0",
+            }
+
+            info = {}
+            dispatcher = SnmpDispatcher()
+
+            try:
+                # Crea transport asincrono
+                transport = await UdpTransportTarget.create(
+                    (address, port), 
+                    timeout=5, 
+                    retries=1
+                )
+                
+                # Query OID di base (sempre)
+                for name, oid in oids_basic.items():
+                    try:
+                        errorIndication, errorStatus, errorIndex, varBinds = await get_cmd(
+                            dispatcher,
+                            CommunityData(community, mpModel=1 if version == "2c" else 0),
+                            transport,
+                            ObjectType(ObjectIdentity(oid))
+                        )
+
+                        if errorIndication or errorStatus:
+                            continue
+
+                        for varBind in varBinds:
+                            value = str(varBind[1])
+                            if value and value != "No Such Object" and value != "No Such Instance":
+                                info[name] = value
+                    except Exception:
+                        continue
+                
+                # Query Entity MIB per modello/seriale/vendor
+                for name, oid in oids_entity.items():
+                    try:
+                        errorIndication, errorStatus, errorIndex, varBinds = await get_cmd(
+                            dispatcher,
+                            CommunityData(community, mpModel=1 if version == "2c" else 0),
+                            transport,
+                            ObjectType(ObjectIdentity(oid))
+                        )
+
+                        if errorIndication or errorStatus:
+                            continue
+
+                        for varBind in varBinds:
+                            value = str(varBind[1])
+                            if value and value != "No Such Object" and value != "No Such Instance":
+                                info[name] = value
+                    except Exception:
+                        continue
+                
+                # Query OID vendor-specific in base a sysObjectID
+                sys_object_id = info.get("sysObjectID", "")
+                vendor_oids_to_query = {}
+                
+                if sys_object_id.startswith("1.3.6.1.4.1.9"):  # Cisco
+                    vendor_oids_to_query["ciscoSerial"] = oids_vendor_specific["ciscoSerial"]
+                elif sys_object_id.startswith("1.3.6.1.4.1.11") or sys_object_id.startswith("1.3.6.1.4.1.25506"):  # HP
+                    vendor_oids_to_query["hpSerial"] = oids_vendor_specific["hpSerial"]
+                elif sys_object_id.startswith("1.3.6.1.4.1.41112"):  # Ubiquiti
+                    vendor_oids_to_query["ubntModel"] = oids_vendor_specific["ubntModel"]
+                    vendor_oids_to_query["ubntVersion"] = oids_vendor_specific["ubntVersion"]
+                elif sys_object_id.startswith("1.3.6.1.4.1.6574"):  # Synology
+                    vendor_oids_to_query["synoModel"] = oids_vendor_specific["synoModel"]
+                    vendor_oids_to_query["synoSerial"] = oids_vendor_specific["synoSerial"]
+                elif sys_object_id.startswith("1.3.6.1.4.1.24681"):  # QNAP
+                    vendor_oids_to_query["qnapModel"] = oids_vendor_specific["qnapModel"]
+                    vendor_oids_to_query["qnapSerial"] = oids_vendor_specific["qnapSerial"]
+                elif sys_object_id.startswith("1.3.6.1.4.1.318"):  # APC
+                    vendor_oids_to_query["apcModel"] = oids_vendor_specific["apcModel"]
+                    vendor_oids_to_query["apcSerial"] = oids_vendor_specific["apcSerial"]
+                    vendor_oids_to_query["apcFirmware"] = oids_vendor_specific["apcFirmware"]
+                
+                for name, oid in vendor_oids_to_query.items():
+                    try:
+                        errorIndication, errorStatus, errorIndex, varBinds = await get_cmd(
+                            dispatcher,
+                            CommunityData(community, mpModel=1 if version == "2c" else 0),
+                            transport,
+                            ObjectType(ObjectIdentity(oid))
+                        )
+
+                        if errorIndication or errorStatus:
+                            continue
+
+                        for varBind in varBinds:
+                            value = str(varBind[1])
+                            if value and value != "No Such Object" and value != "No Such Instance":
+                                info[name] = value
+                    except Exception as e:
+                        logger.debug(f"SNMP OID {name} exception: {e}")
+                        continue
+            finally:
+                dispatcher.transport_dispatcher.close_dispatcher()
+
+            if not info:
+                logger.warning(f"SNMP probe failed for {address}:{port} - No SNMP response")
+                return ProbeResult(
+                    success=False,
+                    protocol="snmp",
+                    error="No SNMP response"
+                )
+            
+            # Analizza sysDescr e sysObjectID per identificare device
+            sys_descr = info.get("sysDescr", "").lower()
+            sys_name = info.get("sysName", "")
+            sys_object_id = info.get("sysObjectID", "")
+            
+            device_type = "network"
+            category = "switch"
+            os_family = None
+            vendor = None
+            model = None
+            
+            # Estrai modello da sysDescr se possibile
+            sys_descr_orig = info.get("sysDescr", "")
+            
+            # Check sysObjectID per vendor noti (OID enterprise numbers)
+            # https://www.iana.org/assignments/enterprise-numbers/
+            if sys_object_id.startswith("1.3.6.1.4.1.41112"):  # Ubiquiti
+                vendor = "Ubiquiti"
+                device_type = "network"
+                os_family = "UniFi"
+                model = sys_descr_orig.split()[0] if sys_descr_orig else None
+                # Identifica tipo device Ubiquiti
+                if any(x in sys_descr for x in ["u6", "u7", "uap", "ap", "nanohd", "flexhd", "lite", "lr", "pro"]):
+                    category = "ap"
+                elif any(x in sys_descr for x in ["usw", "switch", "us-"]):
+                    category = "switch"
+                elif any(x in sys_descr for x in ["usg", "udm", "dream", "gateway"]):
+                    category = "router"
+                else:
+                    category = "ap"  # Default Ubiquiti = access point
+            elif sys_object_id.startswith("1.3.6.1.4.1.14988"):  # MikroTik
+                vendor = "MikroTik"
+                device_type = "mikrotik"
+                category = "router"
+                os_family = "RouterOS"
+            elif sys_object_id.startswith("1.3.6.1.4.1.9"):  # Cisco
+                vendor = "Cisco"
+                device_type = "network"
+                os_family = "IOS"
+                if "catalyst" in sys_descr:
+                    category = "switch"
+                elif "asa" in sys_descr or "firepower" in sys_descr:
+                    category = "firewall"
+                else:
+                    category = "router"
+            elif sys_object_id.startswith("1.3.6.1.4.1.2636"):  # Juniper
+                vendor = "Juniper"
+                device_type = "network"
+                category = "router"
+                os_family = "JunOS"
+            elif sys_object_id.startswith("1.3.6.1.4.1.12356"):  # Fortinet
+                vendor = "Fortinet"
+                device_type = "network"
+                category = "firewall"
+                os_family = "FortiOS"
+            elif sys_object_id.startswith("1.3.6.1.4.1.11") or sys_object_id.startswith("1.3.6.1.4.1.25506"):  # HP/HPE/Aruba
+                vendor = "HPE/Aruba"
+                device_type = "network"
+                category = "switch"
+                os_family = "ArubaOS"
+            elif sys_object_id.startswith("1.3.6.1.4.1.318"):  # APC
+                vendor = "APC"
+                device_type = "ups"
+                category = "ups"
+            elif sys_object_id.startswith("1.3.6.1.4.1.3375"):  # F5
+                vendor = "F5"
+                device_type = "network"
+                category = "loadbalancer"
+                os_family = "TMOS"
+            elif sys_object_id.startswith("1.3.6.1.4.1.6574"):  # Synology
+                vendor = "Synology"
+                device_type = "nas"
+                category = "storage"
+                os_family = "DSM"
+            elif sys_object_id.startswith("1.3.6.1.4.1.24681"):  # QNAP
+                vendor = "QNAP"
+                device_type = "nas"
+                category = "storage"
+                os_family = "QTS"
+            # Fallback: analizza sysDescr
+            elif "mikrotik" in sys_descr or "routeros" in sys_descr:
+                device_type = "mikrotik"
+                category = "router"
+                os_family = "RouterOS"
+                vendor = "MikroTik"
+            elif "cisco" in sys_descr:
+                device_type = "network"
+                vendor = "Cisco"
+                if "catalyst" in sys_descr:
+                    category = "switch"
+                elif "asa" in sys_descr:
+                    category = "firewall"
+                else:
+                    category = "router"
+                os_family = "IOS"
+            elif "juniper" in sys_descr:
+                device_type = "network"
+                category = "router"
+                os_family = "JunOS"
+                vendor = "Juniper"
+            elif "fortinet" in sys_descr or "fortigate" in sys_descr:
+                device_type = "network"
+                category = "firewall"
+                os_family = "FortiOS"
+                vendor = "Fortinet"
+            elif "ubiquiti" in sys_descr or "unifi" in sys_descr:
+                device_type = "network"
+                category = "ap"
+                os_family = "UniFi"
+                vendor = "Ubiquiti"
+            elif "hp" in sys_descr or "procurve" in sys_descr or "aruba" in sys_descr:
+                device_type = "network"
+                category = "switch"
+                os_family = "ProCurve"
+                vendor = "HPE/Aruba"
+            elif "linux" in sys_descr:
+                device_type = "linux"
+                category = "server"
+                os_family = "Linux"
+            elif "windows" in sys_descr:
+                device_type = "windows"
+                category = "server"
+                os_family = "Windows"
+            elif "printer" in sys_descr or "laserjet" in sys_descr or "canon" in sys_descr:
+                device_type = "printer"
+                category = "printer"
+            elif "ups" in sys_descr or "apc" in sys_descr:
+                device_type = "ups"
+                category = "ups"
+            
+            # Estrai modello, seriale, firmware dai dati raccolti
+            serial_number = None
+            firmware_version = None
+            hardware_version = None
+            
+            # Priorità 1: Entity MIB (standard)
+            if not model:
+                model = info.get("entPhysicalModelName") or info.get("entPhysicalName")
+            if not serial_number:
+                serial_number = info.get("entPhysicalSerialNum")
+            if not vendor:
+                vendor = info.get("entPhysicalMfgName")
+            if not firmware_version:
+                firmware_version = info.get("entPhysicalSoftwareRev") or info.get("entPhysicalFirmwareRev")
+            if not hardware_version:
+                hardware_version = info.get("entPhysicalHardwareRev")
+            
+            # Priorità 2: OID vendor-specific
+            if not model:
+                model = info.get("ubntModel") or info.get("synoModel") or info.get("qnapModel") or info.get("apcModel")
+            if not serial_number:
+                serial_number = info.get("ciscoSerial") or info.get("hpSerial") or info.get("synoSerial") or info.get("qnapSerial") or info.get("apcSerial")
+            if not firmware_version:
+                firmware_version = info.get("ubntVersion") or info.get("apcFirmware")
+            
+            # Priorità 3: Estrai modello da sysDescr se non trovato
+            if not model and sys_descr_orig:
+                # Prova a estrarre il primo "word" che sembra un modello
+                parts = sys_descr_orig.split()
+                if parts:
+                    # Per molti dispositivi, il modello è la prima parola
+                    model = parts[0]
+                    # Se c'è anche una versione, potrebbe essere "Model version"
+                    if len(parts) > 1 and parts[1][0].isdigit():
+                        # Probabilmente "Model X.Y.Z" - model è solo la prima parte
+                        pass
+            
+            # Aggiungi tutti i dati raccolti a extra_info
+            if vendor:
+                info["vendor"] = vendor
+            if model:
+                info["model"] = model
+            if serial_number:
+                info["serial_number"] = serial_number
+            if firmware_version:
+                info["firmware_version"] = firmware_version
+                info["os_version"] = firmware_version  # Alias per compatibilità
+            if hardware_version:
+                info["hardware_version"] = hardware_version
+            
+            # Log dettagliato
+            details = []
+            if model:
+                details.append(f"model={model}")
+            if serial_number:
+                details.append(f"serial={serial_number}")
+            if firmware_version:
+                details.append(f"fw={firmware_version}")
+            details_str = ", ".join(details) if details else "no details"
+            
+            logger.success(f"SNMP probe successful for {address}: {sys_name} ({vendor or 'unknown'} {device_type}/{category}) [{details_str}]")
+            return ProbeResult(
+                success=True,
+                protocol="snmp",
+                device_type=device_type,
+                category=category,
+                os_family=os_family,
+                hostname=sys_name,
+                model=model,
+                extra_info=info
+            )
+
+        except ImportError:
+            logger.error(f"SNMP probe failed for {address} - pysnmp not installed")
+            return ProbeResult(
+                success=False,
+                protocol="snmp",
+                error="pysnmp not installed"
+            )
+        except Exception as e:
+            logger.error(f"SNMP probe failed for {address}:{port} - {type(e).__name__}: {str(e)}")
+            return ProbeResult(
+                success=False,
+                protocol="snmp",
+                error=str(e)
+            )
+    
+    async def _probe_wmi(self, address: str, credentials: Dict) -> ProbeResult:
+        """Probe via WMI - identifica Windows"""
+        try:
+            # WMI richiede impacket
+            from impacket.dcerpc.v5 import transport
+            from impacket.dcerpc.v5.dcom import wmi as dcom_wmi
+            from impacket.dcerpc.v5.dcomrt import DCOMConnection
+
+            username = credentials.get("username", "Administrator")
+            password = credentials.get("password", "")
+            domain = credentials.get("wmi_domain", credentials.get("domain", ""))
+
+            logger.debug(f"Attempting WMI probe on {address} with user {domain}\\{username if domain else username}")
+            
+            loop = asyncio.get_event_loop()
+            
+            def connect():
+                # Connessione DCOM
+                dcom = DCOMConnection(
+                    address,
+                    username=username,
+                    password=password,
+                    domain=domain
+                )
+                
+                # Query WMI
+                iInterface = dcom.CoCreateInstanceEx(
+                    dcom_wmi.CLSID_WbemLevel1Login,
+                    dcom_wmi.IID_IWbemLevel1Login
+                )
+                iWbemLevel1Login = dcom_wmi.IWbemLevel1Login(iInterface)
+                iWbemServices = iWbemLevel1Login.NTLMLogin('//./root/cimv2', dcom_wmi.NULL, dcom_wmi.NULL)
+                
+                os_info = {}
+                
+                # Helper per estrarre valore da proprietà impacket WMI
+                def get_prop_value(props, name, default=""):
+                    """Estrae valore da OrderedDict restituito da getProperties()"""
+                    if name in props:
+                        return props[name].get('value', default) or default
+                    return default
+                
+                # Get OS info
+                logger.debug(f"WMI: Querying Win32_OperatingSystem...")
+                try:
+                    result = iWbemServices.ExecQuery("SELECT Caption, Version, BuildNumber, OSArchitecture, SerialNumber FROM Win32_OperatingSystem")
+                    item = result.Next(0xffffffff, 1)[0]
+                    props = item.getProperties()
+                    os_info["name"] = str(get_prop_value(props, "Caption"))
+                    os_info["version"] = str(get_prop_value(props, "Version"))
+                    os_info["build"] = str(get_prop_value(props, "BuildNumber"))
+                    os_info["architecture"] = str(get_prop_value(props, "OSArchitecture"))
+                    os_info["serial_number"] = str(get_prop_value(props, "SerialNumber"))
+                    logger.debug(f"WMI OS: {os_info.get('name')} v{os_info.get('version')}")
+                except Exception as e:
+                    logger.warning(f"WMI Win32_OperatingSystem query failed: {type(e).__name__}: {e}")
+
+                # Get computer name
+                logger.debug(f"WMI: Querying Win32_ComputerSystem...")
+                try:
+                    result = iWbemServices.ExecQuery("SELECT Name, Domain, Model, Manufacturer, TotalPhysicalMemory FROM Win32_ComputerSystem")
+                    item = result.Next(0xffffffff, 1)[0]
+                    props = item.getProperties()
+                    os_info["hostname"] = str(get_prop_value(props, "Name"))
+                    os_info["domain"] = str(get_prop_value(props, "Domain"))
+                    os_info["model"] = str(get_prop_value(props, "Model"))
+                    os_info["manufacturer"] = str(get_prop_value(props, "Manufacturer"))
+                    mem_val = get_prop_value(props, "TotalPhysicalMemory")
+                    if mem_val:
+                        try:
+                            os_info["memory_total_mb"] = int(mem_val) // (1024*1024)
+                        except (ValueError, TypeError):
+                            pass
+                    logger.debug(f"WMI Computer: {os_info.get('hostname')} ({os_info.get('manufacturer')} {os_info.get('model')})")
+                except Exception as e:
+                    logger.warning(f"WMI Win32_ComputerSystem query failed: {type(e).__name__}: {e}")
+                
+                # Get CPU Info
+                logger.debug(f"WMI: Querying Win32_Processor...")
+                try:
+                    result = iWbemServices.ExecQuery("SELECT Name, NumberOfCores FROM Win32_Processor")
+                    item = result.Next(0xffffffff, 1)[0]
+                    props = item.getProperties()
+                    os_info["cpu_model"] = str(get_prop_value(props, "Name"))
+                    cores_val = get_prop_value(props, "NumberOfCores")
+                    if cores_val:
+                        try:
+                            os_info["cpu_cores"] = int(cores_val)
+                        except (ValueError, TypeError):
+                            pass
+                    logger.debug(f"WMI CPU: {os_info.get('cpu_model')} ({os_info.get('cpu_cores')} cores)")
+                except Exception as e:
+                    logger.warning(f"WMI Win32_Processor query failed: {type(e).__name__}: {e}")
+
+                # Get Disk Info (C:)
+                logger.debug(f"WMI: Querying Win32_LogicalDisk...")
+                try:
+                    result = iWbemServices.ExecQuery("SELECT Size, FreeSpace FROM Win32_LogicalDisk WHERE DeviceID='C:'")
+                    item = result.Next(0xffffffff, 1)[0]
+                    props = item.getProperties()
+                    size_val = get_prop_value(props, "Size")
+                    free_val = get_prop_value(props, "FreeSpace")
+                    if size_val:
+                        try:
+                            os_info["disk_total_gb"] = int(size_val) // (1024**3)
+                        except (ValueError, TypeError):
+                            pass
+                    if free_val:
+                        try:
+                            os_info["disk_free_gb"] = int(free_val) // (1024**3)
+                        except (ValueError, TypeError):
+                            pass
+                    logger.debug(f"WMI Disk: {os_info.get('disk_total_gb')}GB total, {os_info.get('disk_free_gb')}GB free")
+                except Exception as e:
+                    logger.warning(f"WMI Win32_LogicalDisk query failed: {type(e).__name__}: {e}")
+
+                logger.info(f"WMI collected data: {list(os_info.keys())} = {os_info}")
+                dcom.disconnect()
+                return os_info
+            
+            info = await loop.run_in_executor(self._executor, connect)
+
+            # Determina categoria
+            category = "workstation"
+            if "server" in info.get("name", "").lower():
+                category = "server"
+
+            logger.success(f"WMI probe successful for {address}: {info.get('hostname')} ({info.get('name')})")
+            return ProbeResult(
+                success=True,
+                protocol="wmi",
+                device_type="windows",
+                category=category,
+                os_family="Windows",
+                os_version=info.get("version"),
+                hostname=info.get("hostname"),
+                model=info.get("model"),
+                extra_info=info
+            )
+
+        except ImportError:
+            logger.error(f"WMI probe failed for {address} - impacket not installed")
+            return ProbeResult(
+                success=False,
+                protocol="wmi",
+                error="impacket not installed"
+            )
+        except Exception as e:
+            logger.error(f"WMI probe failed for {address} - {type(e).__name__}: {str(e)}")
+            return ProbeResult(
+                success=False,
+                protocol="wmi",
+                error=str(e)
+            )
+    
+    async def probe_port(self, address: str, port: int, timeout: float = 2.0) -> bool:
+        """Test se una porta è aperta"""
+        loop = asyncio.get_event_loop()
+        
+        def check():
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            try:
+                result = sock.connect_ex((address, port))
+                return result == 0
+            finally:
+                sock.close()
+        
+        return await loop.run_in_executor(self._executor, check)
+    
+    async def detect_available_protocols(self, address: str) -> List[str]:
+        """Rileva quali protocolli sono disponibili su un host"""
+        protocols = []
+
+        # Test porte comuni
+        port_checks = [
+            (8728, "mikrotik_api"),  # RouterOS API
+            (22, "ssh"),             # SSH
+            (161, "snmp"),           # SNMP (UDP, ma testiamo comunque)
+            (135, "wmi"),            # WMI/RPC
+            (445, "wmi"),            # SMB (per WMI)
+        ]
+
+        tasks = []
+        for port, protocol in port_checks:
+            tasks.append(self.probe_port(address, port))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        seen = set()
+        for (port, protocol), result in zip(port_checks, results):
+            if result is True and protocol not in seen:
+                protocols.append(protocol)
+                seen.add(protocol)
+
+        return protocols
+
+    async def reverse_dns_lookup(
+        self, 
+        address: str, 
+        dns_servers: List[str] = None,
+        agent: Optional['MikroTikAgent'] = None,
+        use_agent: bool = True
+    ) -> str:
+        """
+        Esegue reverse DNS lookup per ottenere hostname da IP.
+        
+        Args:
+            address: IP address da risolvere
+            dns_servers: Lista di DNS server da usare (opzionale).
+            agent: Agente MikroTik per query DNS remote (opzionale)
+            use_agent: Se True e agent è specificato, usa l'agente
+        
+        Returns:
+            str: hostname se trovato, altrimenti stringa vuota
+        """
+        loop = asyncio.get_event_loop()
+        
+        # Se abbiamo un agente, prova prima tramite MikroTik
+        if agent and use_agent:
+            try:
+                from .mikrotik_service import get_mikrotik_service
+                mikrotik = get_mikrotik_service()
+                
+                def lookup_via_mikrotik():
+                    return mikrotik.reverse_dns_lookup(
+                        address=agent.address,
+                        port=agent.api_port,
+                        username=agent.username,
+                        password=agent.password,
+                        target_ip=address,
+                        dns_server=agent.dns_server or (dns_servers[0] if dns_servers else None),
+                        use_ssl=agent.use_ssl,
+                    )
+                
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, lookup_via_mikrotik),
+                    timeout=5.0
+                )
+                
+                if result.get("success") and result.get("hostname"):
+                    hostname = result["hostname"]
+                    logger.info(f"Reverse DNS via MikroTik for {address}: {hostname}")
+                    return hostname
+            except Exception as e:
+                logger.debug(f"MikroTik reverse DNS failed for {address}: {e}")
+                # Continua con fallback
+
+        def lookup_with_dnspython():
+            """Usa dnspython per query PTR con DNS server specifico"""
+            try:
+                import dns.resolver
+                import dns.reversename
+                
+                # Crea nome PTR
+                rev_name = dns.reversename.from_address(address)
+                
+                # Crea resolver con DNS server specifico
+                resolver = dns.resolver.Resolver()
+                if dns_servers:
+                    resolver.nameservers = dns_servers
+                resolver.timeout = 2
+                resolver.lifetime = 3
+                
+                answers = resolver.resolve(rev_name, 'PTR')
+                for rdata in answers:
+                    hostname = str(rdata).rstrip('.')
+                    return hostname
+                return ""
+            except Exception as e:
+                logger.debug(f"dnspython PTR lookup failed for {address}: {type(e).__name__}")
+                return ""
+
+        def lookup_system():
+            """Usa resolver di sistema"""
+            try:
+                import socket
+                socket.setdefaulttimeout(2.0)
+                hostname, _, _ = socket.gethostbyaddr(address)
+                return hostname
+            except (socket.herror, socket.gaierror, OSError, socket.timeout) as e:
+                logger.debug(f"System reverse DNS lookup failed for {address}: {e}")
+                return ""
+            finally:
+                socket.setdefaulttimeout(None)
+
+        try:
+            hostname = ""
+            
+            # Se specificati DNS server, usa dnspython
+            if dns_servers:
+                hostname = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, lookup_with_dnspython),
+                    timeout=4.0
+                )
+            
+            # Fallback a resolver di sistema se dnspython fallisce o non specificato
+            if not hostname:
+                hostname = await asyncio.wait_for(
+                    loop.run_in_executor(self._executor, lookup_system),
+                    timeout=3.0
+                )
+            
+            if hostname:
+                logger.info(f"Reverse DNS for {address}: {hostname}")
+            return hostname
+        except asyncio.TimeoutError:
+            logger.debug(f"Reverse DNS lookup timeout for {address}")
+            return ""
+        except Exception as e:
+            logger.debug(f"Reverse DNS lookup failed for {address}: {e}")
+            return ""
+
+    async def suggest_credential_type(self, address: str) -> str:
+        """
+        Suggerisce il tipo di credenziali in base alle porte aperte.
+
+        Regole:
+        - Se risponde a 389 (LDAP), 445 (SMB), o 3389 (RDP) -> wmi (Windows)
+        - Se risponde a 161 (SNMP) -> snmp
+        - Se risponde a 22 (SSH) ma non SNMP e non WMI -> ssh (Linux)
+        - Se risponde a 8728 (RouterOS API) -> mikrotik
+
+        Returns:
+            str: "wmi", "snmp", "ssh", "mikrotik", o "unknown"
+        """
+        # Test porte per identificare il tipo di sistema
+        port_checks = [
+            (389, "ldap"),      # LDAP (Windows AD)
+            (445, "smb"),       # SMB (Windows)
+            (3389, "rdp"),      # RDP (Windows)
+            (161, "snmp"),      # SNMP
+            (22, "ssh"),        # SSH
+            (8728, "mikrotik"), # RouterOS API
+            (135, "wmi"),       # WMI/RPC (Windows)
+        ]
+
+        tasks = []
+        for port, _ in port_checks:
+            tasks.append(self.probe_port(address, port, timeout=2.0))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Raccogli porte aperte
+        open_ports = {}
+        for (port, service), result in zip(port_checks, results):
+            if result is True:
+                open_ports[service] = port
+
+        logger.debug(f"Open ports for {address}: {open_ports}")
+
+        # Determina tipo credenziali in base alle porte aperte
+        # IMPORTANTE: La priorità è fondamentale perché Windows può avere SSH installato
+
+        # Priorità 1: Windows (SMB è l'indicatore più affidabile, poi RDP, WMI, LDAP)
+        # SMB (445) è quasi esclusivamente Windows
+        if "smb" in open_ports:
+            logger.info(f"Suggesting WMI credentials for {address} (SMB detected - Windows)")
+            return "wmi"
+
+        # RDP (3389) è esclusivamente Windows
+        if "rdp" in open_ports:
+            logger.info(f"Suggesting WMI credentials for {address} (RDP detected - Windows)")
+            return "wmi"
+
+        # WMI/RPC (135) è Windows
+        if "wmi" in open_ports:
+            logger.info(f"Suggesting WMI credentials for {address} (WMI/RPC detected - Windows)")
+            return "wmi"
+
+        # LDAP (389) di solito è Windows AD
+        if "ldap" in open_ports:
+            logger.info(f"Suggesting WMI credentials for {address} (LDAP detected - likely Windows AD)")
+            return "wmi"
+
+        # Priorità 2: MikroTik
+        if "mikrotik" in open_ports:
+            logger.info(f"Suggesting MikroTik credentials for {address} (RouterOS API detected)")
+            return "mikrotik"
+
+        # Priorità 3: SNMP (dispositivi di rete) - solo se non ha SSH
+        if "snmp" in open_ports and "ssh" not in open_ports:
+            logger.info(f"Suggesting SNMP credentials for {address} (SNMP only - network device)")
+            return "snmp"
+
+        # Priorità 4: SSH + SNMP (dispositivi di rete gestibili via SSH)
+        if "ssh" in open_ports and "snmp" in open_ports:
+            logger.info(f"Suggesting SSH credentials for {address} (SSH + SNMP - managed network device)")
+            return "ssh"
+
+        # Priorità 5: SSH solo (Linux/Unix)
+        if "ssh" in open_ports:
+            logger.info(f"Suggesting SSH credentials for {address} (SSH only - Linux/Unix)")
+            return "ssh"
+
+        logger.warning(f"Could not determine credential type for {address}")
+        return "unknown"
+    
+    async def scan_services(
+        self, 
+        address: str, 
+        agent: Optional['MikroTikAgent'] = None,
+        use_agent: bool = True
+    ) -> List[Dict[str, Any]]:
+        """
+        Esegue scansione completa delle porte per identificare servizi attivi.
+        Include tutte le porte TCP/UDP importanti per identificazione OS/ruolo sistema.
+
+        Args:
+            address: IP del dispositivo da scansionare
+            agent: Agente MikroTik da usare per la scansione (opzionale)
+            use_agent: Se True e agent è specificato, usa l'agente. Se False, usa connessione diretta.
+
+        Returns:
+            Lista di servizi rilevati: [{"port": 80, "protocol": "tcp", "service": "http", "open": true}, ...]
+        """
+        # Se abbiamo un agente e use_agent è True, usa MikroTik
+        if agent and use_agent:
+            return await self._scan_services_via_mikrotik(address, agent)
+        # Porte TCP da scansionare (priorità per identificazione OS/ruolo)
+        tcp_ports = {
+            # Remote Access (identificazione OS)
+            22: "ssh",          # *nix/BSD, appliance, Windows hardenato
+            23: "telnet",       # Legacy, appliance di rete, vecchi Unix/embedded
+            3389: "rdp",        # Windows Desktop/Server (forte indicatore)
+            5900: "vnc",        # Linux desktop/appliance
+            5901: "vnc",
+            5902: "vnc",
+            5903: "vnc",
+            5904: "vnc",
+            5905: "vnc",
+
+            # Windows (forti indicatori)
+            135: "wmi",         # MS RPC Endpoint Mapper (Windows)
+            139: "netbios",    # NetBIOS (Windows legacy)
+            445: "smb",        # SMB (Windows - molto tipico)
+            5985: "winrm-http",   # WinRM (Windows server moderno)
+            5986: "winrm-https",
+
+            # Directory Services
+            389: "ldap",       # LDAP (AD domain controller o directory *nix)
+            636: "ldaps",      # LDAPS
+
+            # Web Services (banner e stack TLS aiutano identificazione)
+            80: "http",
+            443: "https",
+            8000: "http-alt",  # Appliance, Java app server, reverse proxy
+            8080: "http-proxy",
+            8443: "https-alt",
+
+            # Mail (tipico mail server *nix)
+            25: "smtp",
+            110: "pop3",
+            143: "imap",
+            465: "smtps",
+            587: "smtp-submission",
+            993: "imaps",
+            995: "pop3s",
+
+            # Databases (quasi sempre *nix)
+            3306: "mysql",
+            5432: "postgresql",
+            1433: "mssql",     # SQL Server (Windows)
+            1521: "oracle",
+            27017: "mongodb",
+            6379: "redis",
+
+            # File Services
+            21: "ftp",
+            20: "ftp-data",
+            69: "tftp",
+            111: "rpcbind",    # RPCbind/portmapper (marcato Unix/Linux)
+            2049: "nfs",       # NFS (forte indicatore Unix/Linux)
+
+            # Network Management
+            161: "snmp",       # SNMP (device di rete, appliance, host server con agent)
+            162: "snmp-trap",
+            8728: "mikrotik-api",
+            8291: "mikrotik-winbox",
+
+            # DNS
+            53: "dns",         # DNS (server DNS dedicati, AD, appliance)
+
+            # Other Services
+            123: "ntp",
+            514: "syslog",
+            1900: "ssdp",
+        }
+
+        # Porte UDP da scansionare (infra e appliance)
+        udp_ports = {
+            53: "dns",         # DNS (pattern di risposta e EDNS aiutano identificazione)
+            67: "dhcp-server", # DHCP (tipico server infra, router, appliance)
+            68: "dhcp-client",
+            69: "tftp",
+            123: "ntp",        # NTP (versione e implementation spesso OS-specifica)
+            137: "netbios-ns", # NetBIOS (Windows legacy, vecchi domain/lan)
+            138: "netbios-dgm",
+            161: "snmp",       # SNMP (device di rete, appliance, host server con agent)
+            162: "snmp-trap",
+            500: "ipsec-ike",  # IKE/IPsec (firewall/VPN appliance, server)
+            1900: "ssdp",      # SSDP/UPnP (device consumer, appliance, NAS)
+            5353: "mdns",
+        }
+
+        logger.info(f"Starting service scan on {address} ({len(tcp_ports)} TCP + {len(udp_ports)} UDP ports)")
+
+        services = []
+
+        # Scansione TCP (più veloce e affidabile)
+        tcp_tasks = []
+        for port, service_name in tcp_ports.items():
+            tcp_tasks.append(self._scan_tcp_port(address, port, service_name))
+
+        tcp_results = await asyncio.gather(*tcp_tasks, return_exceptions=True)
+        for result in tcp_results:
+            if isinstance(result, dict) and result.get("open"):
+                services.append(result)
+
+        logger.info(f"TCP scan complete for {address}: {len(services)} open ports found")
+
+        # Scansione UDP (opzionale, più lenta)
+        # Limitiamo a porte critiche per identificazione
+        udp_critical = {53: "dns", 67: "dhcp-server", 68: "dhcp-client", 123: "ntp", 161: "snmp", 162: "snmp-trap", 500: "ipsec-ike", 1900: "ssdp"}
+        udp_tasks = []
+        for port, service_name in udp_critical.items():
+            udp_tasks.append(self._scan_udp_port(address, port, service_name))
+
+        udp_results = await asyncio.gather(*udp_tasks, return_exceptions=True)
+        for result in udp_results:
+            if isinstance(result, dict) and result.get("open"):
+                services.append(result)
+
+        logger.info(f"Service scan complete for {address}: {len(services)} services detected (TCP + UDP)")
+
+        return services
+
+    async def _scan_tcp_port(self, address: str, port: int, service_name: str) -> Dict[str, Any]:
+        """Scansiona una singola porta TCP"""
+        loop = asyncio.get_event_loop()
+
+        def check():
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1.0)  # Timeout breve per velocità
+            try:
+                result = sock.connect_ex((address, port))
+                return result == 0
+            except:
+                return False
+            finally:
+                sock.close()
+
+        try:
+            is_open = await loop.run_in_executor(self._executor, check)
+            return {
+                "port": port,
+                "protocol": "tcp",
+                "service": service_name,
+                "open": is_open
+            }
+        except Exception as e:
+            logger.debug(f"Error scanning {address}:{port} - {e}")
+            return {
+                "port": port,
+                "protocol": "tcp",
+                "service": service_name,
+                "open": False
+            }
+
+    async def _scan_udp_port(self, address: str, port: int, service_name: str) -> Dict[str, Any]:
+        """Scansiona una singola porta UDP"""
+        loop = asyncio.get_event_loop()
+
+        def check():
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(1.0)
+            try:
+                # Per UDP, proviamo a inviare un pacchetto e vedere se c'è risposta
+                # Alcuni servizi UDP rispondono solo a query specifiche
+                sock.sendto(b'\x00', (address, port))
+                sock.recvfrom(1024)
+                return True
+            except socket.timeout:
+                # Timeout può significare porta aperta ma senza risposta
+                # Per SNMP/DNS/NTP proviamo query specifiche
+                if port == 161:  # SNMP
+                    try:
+                        sock.sendto(b'\x30\x26\x02\x01\x00\x04\x06\x70\x75\x62\x6c\x69\x63\xa0\x19\x02\x04', (address, port))
+                        sock.recvfrom(1024)
+                        return True
+                    except:
+                        return False
+                elif port == 53:  # DNS
+                    try:
+                        import struct
+                        query = b'\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01'
+                        sock.sendto(query, (address, port))
+                        sock.recvfrom(1024)
+                        return True
+                    except:
+                        return False
+                return False
+            except:
+                return False
+            finally:
+                sock.close()
+
+        try:
+            is_open = await loop.run_in_executor(self._executor, check)
+            return {
+                "port": port,
+                "protocol": "udp",
+                "service": service_name,
+                "open": is_open
+            }
+        except Exception as e:
+            logger.debug(f"Error scanning UDP {address}:{port} - {e}")
+            return {
+                "port": port,
+                "protocol": "udp",
+                "service": service_name,
+                "open": False
+            }
+    
+    async def _scan_services_via_mikrotik(
+        self, 
+        address: str, 
+        agent: 'MikroTikAgent'
+    ) -> List[Dict[str, Any]]:
+        """
+        Esegue scansione porte tramite router MikroTik.
+        Usa SSH per eseguire test di connettività dal router.
+        """
+        from .mikrotik_service import get_mikrotik_service
+        
+        logger.info(f"Scanning services on {address} via MikroTik agent {agent.address}")
+        
+        mikrotik = get_mikrotik_service()
+        
+        # Esegui scan tramite MikroTik
+        loop = asyncio.get_event_loop()
+        
+        def run_scan():
+            return mikrotik.scan_ports(
+                address=agent.address,
+                port=agent.api_port,
+                username=agent.username,
+                password=agent.password,
+                target_ip=address,
+                use_ssl=agent.use_ssl,
+            )
+        
+        try:
+            result = await loop.run_in_executor(self._executor, run_scan)
+            
+            if result.get("success"):
+                logger.info(f"MikroTik port scan complete for {address}: {len(result.get('open_ports', []))} ports open")
+                return result.get("open_ports", [])
+            else:
+                logger.warning(f"MikroTik port scan failed for {address}: {result.get('error')}")
+                # Fallback a scan diretto
+                logger.info(f"Falling back to direct port scan for {address}")
+                return await self.scan_services(address, agent=None, use_agent=False)
+        except Exception as e:
+            logger.error(f"Error in MikroTik port scan: {e}")
+            # Fallback a scan diretto
+            return await self.scan_services(address, agent=None, use_agent=False)
+
+    async def auto_identify_device(
+        self,
+        address: str,
+        mac_address: str = None,
+        credentials_list: List[Dict] = None,
+        agent: Optional['MikroTikAgent'] = None,
+        use_agent: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Identificazione automatica del dispositivo.
+
+        1. Lookup vendor dal MAC
+        2. Rileva protocolli disponibili
+        3. Prova le credenziali fornite
+        4. Scansiona servizi attivi
+
+        Args:
+            address: IP del dispositivo
+            mac_address: MAC address (opzionale, per vendor lookup)
+            credentials_list: Lista credenziali da provare
+            agent: Agente MikroTik per operazioni remote (opzionale)
+            use_agent: Se True e agent è specificato, usa l'agente per port scan e DNS
+
+        Returns:
+            Dict con device_type, category, os_family, hostname, etc
+        """
+        
+        agent_info = f" via agent {agent.address}" if agent and use_agent else ""
+        logger.info(f"Auto-identifying device at {address} (MAC: {mac_address or 'N/A'}){agent_info}")
+
+        result = {
+            "address": address,
+            "mac_address": mac_address,
+            "vendor": None,
+            "device_type": "other",
+            "category": None,
+            "os_family": None,
+            "hostname": None,
+            "model": None,
+            "identified_by": None,
+            "available_protocols": [],
+            "probe_results": [],
+            "open_ports": [],  # Servizi rilevati
+        }
+        
+        # 1. MAC Vendor lookup
+        if mac_address:
+            mac_service = get_mac_lookup_service()
+            vendor_info = mac_service.lookup(mac_address)
+            if vendor_info:
+                result["vendor"] = vendor_info.get("vendor")
+                result["device_type"] = vendor_info.get("device_type", "other")
+                result["category"] = vendor_info.get("category")
+                result["os_family"] = vendor_info.get("os_family")
+                
+                if vendor_info.get("vendor"):
+                    result["identified_by"] = "mac_vendor"
+        
+        # 2. Rileva protocolli
+        try:
+            result["available_protocols"] = await self.detect_available_protocols(address)
+        except Exception as e:
+            logger.warning(f"Protocol detection failed for {address}: {e}")
+        
+        # 3. Prova credenziali se fornite
+        if credentials_list:
+            logger.info(f"Testing {len(credentials_list)} credential(s) for {address}")
+            for idx, creds in enumerate(credentials_list, 1):
+                cred_type = creds.get("type", "")
+                cred_name = creds.get("name", f"credential-{idx}")
+
+                # Scegli protocolli in base al tipo credenziali
+                protocols = []
+                if cred_type == "mikrotik" or cred_type == "routeros":
+                    protocols = ["mikrotik_api"]
+                elif cred_type == "ssh" or cred_type == "linux":
+                    protocols = ["ssh"]
+                elif cred_type == "snmp":
+                    protocols = ["snmp"]
+                elif cred_type == "wmi" or cred_type == "windows":
+                    protocols = ["wmi"]
+                else:
+                    # Prova tutti i protocolli disponibili
+                    protocols = result["available_protocols"]
+
+                logger.debug(f"Testing credential '{cred_name}' (type: {cred_type}) with protocols: {protocols}")
+                probe_results = await self.probe_device(address, creds, protocols)
+                
+                # Arricchisci i risultati con i dati extra raccolti
+                for probe in probe_results:
+                     probe_data = {
+                        "protocol": probe.protocol,
+                        "success": probe.success,
+                        "device_type": probe.device_type,
+                        "category": probe.category,
+                        "os_family": probe.os_family,
+                        "hostname": probe.hostname,
+                        "error": probe.error,
+                        "extra_info": probe.extra_info # Includi extra info
+                    }
+                     result["probe_results"].append(probe_data)
+
+                # Se trovato un risultato positivo, aggiorna
+                for probe in probe_results:
+                    if probe.success and probe.device_type:
+                        result["device_type"] = probe.device_type
+                        result["category"] = probe.category
+                        result["os_family"] = probe.os_family
+                        result["hostname"] = probe.hostname
+                        result["model"] = probe.model
+                        result["identified_by"] = f"probe_{probe.protocol}"
+                        result["credential_used"] = cred_name
+                        
+                        # Merge extra info into main result
+                        # Questo include: cpu_model, cpu_cores, memory_total_mb, 
+                        # disk_total_gb, disk_free_gb, serial_number, manufacturer, domain, etc.
+                        if probe.extra_info:
+                            logger.debug(f"Merging extra_info from {probe.protocol}: {list(probe.extra_info.keys())}")
+                            for key, value in probe.extra_info.items():
+                                if value is not None and value != "":
+                                    result[key] = value
+
+                        logger.success(f"Device {address} identified via {probe.protocol}: type={probe.device_type}, hostname={probe.hostname}, extra_keys={list(probe.extra_info.keys()) if probe.extra_info else []}")
+                        break
+
+                if result["identified_by"] and result["identified_by"].startswith("probe_"):
+                    break
+
+        # 4. Scansiona servizi attivi
+        try:
+            scan_method = "via agent" if agent and use_agent else "direct"
+            logger.info(f"Scanning services on {address} ({scan_method})...")
+            result["open_ports"] = await self.scan_services(address, agent=agent, use_agent=use_agent)
+            logger.info(f"Service scan complete for {address}: {len(result['open_ports'])} services detected")
+            
+            # Usa le porte aperte per migliorare identificazione OS/ruolo se non già identificato
+            if not result.get("identified_by") or result["identified_by"] == "mac_vendor":
+                os_hint = self._identify_os_from_ports(result["open_ports"])
+                if os_hint:
+                    if not result.get("os_family"):
+                        result["os_family"] = os_hint.get("os_family")
+                    if not result.get("device_type") or result["device_type"] == "other":
+                        result["device_type"] = os_hint.get("device_type", "other")
+                    if not result.get("category"):
+                        result["category"] = os_hint.get("category")
+                    result["identified_by"] = "port_scan"
+                    logger.info(f"Identified via port scan: {os_hint}")
+        except Exception as e:
+            logger.warning(f"Service scan failed for {address}: {e}")
+            result["open_ports"] = []
+
+        if not result.get("identified_by") or result["identified_by"] == "mac_vendor":
+            logger.warning(f"Could not fully identify device {address} - only MAC vendor available")
+        else:
+            logger.info(f"Device identification complete for {address}: {result['device_type']} ({result['hostname'] or 'no hostname'})")
+
+        return result
+
+    def _identify_os_from_ports(self, open_ports: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        Identifica OS/ruolo sistema basandosi sulle porte aperte.
+        
+        Returns:
+            Dict con os_family, device_type, category o None
+        """
+        if not open_ports:
+            return None
+        
+        # Estrai porte aperte
+        ports = {p["port"] for p in open_ports if p.get("open")}
+        services = {p["service"] for p in open_ports if p.get("open")}
+        
+        # Windows indicators (priorità alta)
+        windows_ports = {135, 139, 445, 3389, 5985, 5986}
+        windows_services = {"wmi", "netbios", "smb", "rdp", "winrm-http", "winrm-https"}
+        
+        if ports & windows_ports or services & windows_services:
+            # Determina ruolo
+            if 3389 in ports or "rdp" in services:
+                category = "workstation" if 3389 in ports and 445 not in ports else "server"
+            elif 389 in ports or "ldap" in services:
+                category = "server"  # Domain Controller
+            elif 1433 in ports or "mssql" in services:
+                category = "server"  # SQL Server
+            else:
+                category = "server"
+            
+            return {
+                "os_family": "Windows",
+                "device_type": "windows",
+                "category": category
+            }
+        
+        # Linux/Unix indicators
+        linux_ports = {22, 111, 2049, 3306, 5432}
+        linux_services = {"ssh", "rpcbind", "nfs", "mysql", "postgresql"}
+        
+        if (ports & linux_ports or services & linux_services) and not (ports & windows_ports):
+            # Determina ruolo
+            if 3306 in ports or 5432 in ports or "mysql" in services or "postgresql" in services:
+                category = "server"  # Database server
+            elif 25 in ports or 110 in ports or 143 in ports or "smtp" in services:
+                category = "server"  # Mail server
+            elif 80 in ports or 443 in ports or "http" in services:
+                category = "server"  # Web server
+            elif 22 in ports and 161 in ports:
+                category = "network"  # Network device gestibile
+            else:
+                category = "server"
+            
+            return {
+                "os_family": "Linux",
+                "device_type": "linux",
+                "category": category
+            }
+        
+        # Network device indicators
+        network_ports = {161, 162, 8728, 8291}
+        network_services = {"snmp", "mikrotik-api", "mikrotik-winbox"}
+        
+        if ports & network_ports or services & network_services:
+            if 8728 in ports or "mikrotik-api" in services:
+                return {
+                    "os_family": "RouterOS",
+                    "device_type": "mikrotik",
+                    "category": "router"
+                }
+            else:
+                return {
+                    "os_family": "Unknown",
+                    "device_type": "network",
+                    "category": "switch"
+                }
+        
+        # Appliance indicators
+        if 23 in ports or "telnet" in services:
+            return {
+                "os_family": "Unknown",
+                "device_type": "network",
+                "category": "appliance"
+            }
+        
+        return None
+
+
+# Singleton
+_device_probe_service: Optional[DeviceProbeService] = None
+
+
+def get_device_probe_service() -> DeviceProbeService:
+    global _device_probe_service
+    if _device_probe_service is None:
+        _device_probe_service = DeviceProbeService()
+    return _device_probe_service

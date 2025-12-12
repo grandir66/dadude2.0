@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mb-4">
+    <h1 class="h3 mb-1">Configurazione</h1>
+    <p class="text-muted">Impostazioni generali del sistema DaDude</p>
+</div>
+
+<div class="row">
+    <!-- Connessione Dude -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-hdd-network"></i> Connessione Dude Server</span>
+                <span class="status-dot {% if dude_connected %}connected{% else %}disconnected{% endif %}"></span>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Host</label>
+                    <input type="text" class="form-control" value="{{ settings.dude_host }}" disabled>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Porta API</label>
+                        <input type="text" class="form-control" value="{{ settings.dude_api_port }}" disabled>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">SSL</label>
+                        <input type="text" class="form-control" value="{{ 'Sì' if settings.dude_use_ssl else 'No' }}" disabled>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Username</label>
+                    <input type="text" class="form-control" value="{{ settings.dude_username }}" disabled>
+                </div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-primary" onclick="testConnection()">
+                        <i class="bi bi-wifi"></i> Test Connessione
+                    </button>
+                    <button class="btn btn-outline-warning" onclick="reconnect()">
+                        <i class="bi bi-arrow-repeat"></i> Riconnetti
+                    </button>
+                </div>
+                <div class="alert alert-info mt-3 mb-0">
+                    <small><i class="bi bi-info-circle"></i> Per modificare questi parametri, aggiorna il file <code>.env</code> e riavvia il servizio.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Polling -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-clock"></i> Polling & Sync
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Intervallo Polling</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" value="{{ settings.poll_interval }}" disabled>
+                            <span class="input-group-text">sec</span>
+                        </div>
+                        <small class="text-muted">Controllo stato dispositivi</small>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Intervallo Full Sync</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" value="{{ settings.full_sync_interval }}" disabled>
+                            <span class="input-group-text">sec</span>
+                        </div>
+                        <small class="text-muted">Sincronizzazione completa</small>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Timeout Connessione</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" value="{{ settings.connection_timeout }}" disabled>
+                        <span class="input-group-text">sec</span>
+                    </div>
+                </div>
+                <button class="btn btn-primary" onclick="forceSync()">
+                    <i class="bi bi-arrow-clockwise"></i> Forza Sync Ora
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- API -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-code-slash"></i> API DaDude
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Host</label>
+                        <input type="text" class="form-control" value="{{ settings.dadude_host }}" disabled>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Porta</label>
+                        <input type="text" class="form-control" value="{{ settings.dadude_port }}" disabled>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">API Key</label>
+                    <div class="input-group">
+                        <input type="password" class="form-control" value="{{ settings.dadude_api_key or '(non configurata)' }}" disabled id="apiKeyInput">
+                        <button class="btn btn-outline-secondary" onclick="toggleApiKey()">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="d-flex gap-2">
+                    <a href="/docs" target="_blank" class="btn btn-outline-primary">
+                        <i class="bi bi-book"></i> API Docs
+                    </a>
+                    <a href="/redoc" target="_blank" class="btn btn-outline-secondary">
+                        <i class="bi bi-file-text"></i> ReDoc
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Logging -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-journal-text"></i> Logging
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Livello Log</label>
+                        <input type="text" class="form-control" value="{{ settings.log_level }}" disabled>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">File Log</label>
+                        <input type="text" class="form-control" value="{{ settings.log_file }}" disabled>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Navigazione Settings -->
+<div class="card mt-4">
+    <div class="card-header">
+        <i class="bi bi-gear"></i> Altre Configurazioni
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-4">
+                <a href="/settings/webhooks" class="btn btn-outline-primary w-100 py-3">
+                    <i class="bi bi-link-45deg display-6 d-block mb-2"></i>
+                    Webhook
+                </a>
+            </div>
+            <div class="col-md-4">
+                <a href="/settings/import-export" class="btn btn-outline-primary w-100 py-3">
+                    <i class="bi bi-arrow-left-right display-6 d-block mb-2"></i>
+                    Import/Export
+                </a>
+            </div>
+            <div class="col-md-4">
+                <a href="/docs" target="_blank" class="btn btn-outline-primary w-100 py-3">
+                    <i class="bi bi-code-slash display-6 d-block mb-2"></i>
+                    API Documentation
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleApiKey() {
+    const input = document.getElementById('apiKeyInput');
+    input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+async function testConnection() {
+    const response = await fetch('/api/v1/system/health');
+    const data = await response.json();
+    const isConnected = data.components?.dude_connection?.status === 'up';
+    alert(isConnected ? 'Connessione OK!' : 'Connessione fallita!');
+}
+
+async function reconnect() {
+    try {
+        const response = await fetch('/api/v1/system/reconnect', { method: 'POST' });
+        if (response.status === 401) {
+            alert('Riconnessione richiede API key. Riavvia il servizio per riconnetterti.');
+            return;
+        }
+        const data = await response.json();
+        alert(data.status === 'success' ? 'Riconnesso!' : 'Errore: ' + (data.detail || data.message));
+        location.reload();
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+async function forceSync() {
+    try {
+        const response = await fetch('/api/v1/system/sync', { method: 'POST' });
+        if (response.status === 401) {
+            alert('Sync richiede API key.');
+            return;
+        }
+        const data = await response.json();
+        alert(data.status === 'success' ? `Sync completato! ${data.data.devices} device, ${data.data.probes} probe` : 'Errore');
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+</script>
+{% endblock %}

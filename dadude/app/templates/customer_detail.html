@@ -1,0 +1,3195 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Header -->
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb mb-1">
+                <li class="breadcrumb-item"><a href="/customers">Clienti</a></li>
+                <li class="breadcrumb-item active">{{ customer.code }}</li>
+            </ol>
+        </nav>
+        <h1 class="h3 mb-0">{{ customer.name }}</h1>
+    </div>
+    <div>
+        <a href="/customers/{{ customer.id }}/discovery" class="btn btn-primary">
+            <i class="bi bi-search"></i> Discovery
+        </a>
+        <a href="/api/v1/import-export/customers/{{ customer.id }}/networks/csv" class="btn btn-outline-secondary">
+            <i class="bi bi-download"></i> Export Reti
+        </a>
+        <a href="/api/v1/import-export/customers/{{ customer.id }}/credentials/csv" class="btn btn-outline-secondary">
+            <i class="bi bi-download"></i> Export Credenziali
+        </a>
+    </div>
+</div>
+
+<!-- Info Cliente -->
+<div class="row mb-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-info-circle"></i> Informazioni Cliente
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Codice:</strong> <code>{{ customer.code }}</code></p>
+                        <p><strong>Nome:</strong> {{ customer.name }}</p>
+                        <p><strong>Descrizione:</strong> {{ customer.description or '-' }}</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Contatto:</strong> {{ customer.contact_name or '-' }}</p>
+                        <p><strong>Email:</strong> {{ customer.contact_email or '-' }}</p>
+                        <p><strong>Telefono:</strong> {{ customer.contact_phone or '-' }}</p>
+                    </div>
+                </div>
+                {% if customer.address %}
+                <p><strong>Indirizzo:</strong> {{ customer.address }}</p>
+                {% endif %}
+                {% if customer.notes %}
+                <p><strong>Note:</strong> {{ customer.notes }}</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-bar-chart"></i> Riepilogo
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between mb-2">
+                    <span>Reti configurate:</span>
+                    <strong>{{ networks|length }}</strong>
+                </div>
+                <div class="d-flex justify-content-between mb-2">
+                    <span>Credenziali:</span>
+                    <strong>{{ credentials|length }}</strong>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <span>Device assegnati:</span>
+                    <strong>{{ devices|length }}</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tabs -->
+<ul class="nav nav-tabs mb-4" id="customerTabs">
+    <li class="nav-item">
+        <a class="nav-link active" data-bs-toggle="tab" href="#networks">
+            <i class="bi bi-diagram-3"></i> Reti ({{ networks|length }})
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#credentials">
+            <i class="bi bi-key"></i> Credenziali ({{ credentials|length }})
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#agents">
+            <i class="bi bi-broadcast"></i> Sonde ({{ agents|length if agents else 0 }})
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#devices">
+            <i class="bi bi-router"></i> Device ({{ devices|length }})
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" data-bs-toggle="tab" href="#inventory" onclick="loadInventory()">
+            <i class="bi bi-collection"></i> Inventario <span id="inventoryCount" class="badge bg-secondary">0</span>
+        </a>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <!-- Tab Reti -->
+    <div class="tab-pane fade show active" id="networks">
+        <div class="d-flex justify-content-between mb-3">
+            <h5>Reti IP / VLAN</h5>
+            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#newNetworkModal">
+                <i class="bi bi-plus"></i> Nuova Rete
+            </button>
+        </div>
+        <div class="card table-modern">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Tipo</th>
+                        <th>Network</th>
+                        <th>Gateway</th>
+                        <th>VLAN</th>
+                        <th>DNS</th>
+                        <th>Stato</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for net in networks %}
+                    <tr>
+                        <td><strong>{{ net.name }}</strong></td>
+                        <td><span class="badge bg-secondary">{{ net.network_type }}</span></td>
+                        <td><code>{{ net.ip_network }}</code></td>
+                        <td><code>{{ net.gateway or '-' }}</code></td>
+                        <td>
+                            {% if net.vlan_id %}
+                            <span class="badge bg-info">{{ net.vlan_id }}</span>
+                            {{ net.vlan_name or '' }}
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td>{{ net.dns_primary or '-' }}</td>
+                        <td>
+                            {% if net.active %}
+                            <span class="badge bg-success">Attiva</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Inattiva</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7" class="text-center py-4 text-muted">Nessuna rete configurata</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- Tab Credenziali -->
+    <div class="tab-pane fade" id="credentials">
+        <div class="d-flex justify-content-between mb-3">
+            <h5>Credenziali</h5>
+            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#newCredentialModal">
+                <i class="bi bi-plus"></i> Nuova Credenziale
+            </button>
+        </div>
+        <div class="card table-modern">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Tipo</th>
+                        <th>Username</th>
+                        <th>Dettagli</th>
+                        <th>Default</th>
+                        <th>Stato</th>
+                        <th>Azioni</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cred in credentials %}
+                    <tr>
+                        <td><strong>{{ cred.name }}</strong></td>
+                        <td><span class="badge bg-{{ 'success' if cred.credential_type == 'ssh' else 'info' if cred.credential_type == 'snmp' else 'warning' if cred.credential_type == 'wmi' else 'danger' if cred.credential_type == 'mikrotik' else 'primary' }}">{{ cred.credential_type }}</span></td>
+                        <td>{{ cred.username or '-' }}</td>
+                        <td class="small text-muted">
+                            {% if cred.credential_type == 'ssh' %}
+                                Port {{ cred.ssh_port or 22 }}{% if cred.has_ssh_key %} 🔑{% endif %}
+                            {% elif cred.credential_type == 'snmp' %}
+                                v{{ cred.snmp_version or '2c' }} {{ cred.snmp_community or '' }}
+                            {% elif cred.credential_type == 'wmi' %}
+                                {{ cred.wmi_domain or 'LOCAL' }}
+                            {% elif cred.credential_type == 'mikrotik' %}
+                                Port {{ cred.mikrotik_api_port or 8728 }}{% if cred.mikrotik_api_ssl %} SSL{% endif %}
+                            {% else %}
+                                {{ cred.device_filter or '-' }}
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if cred.is_default %}
+                            <span class="badge bg-warning text-dark">Default</span>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if cred.active %}
+                            <span class="badge bg-success">Attiva</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Inattiva</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" onclick="editCredential('{{ cred.id }}')" title="Modifica">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteCredential('{{ cred.id }}', '{{ cred.name }}')" title="Elimina">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7" class="text-center py-4 text-muted">Nessuna credenziale configurata</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- Tab Sonde -->
+    <div class="tab-pane fade" id="agents">
+        <div class="d-flex justify-content-between mb-3">
+            <h5>Sonde Remote</h5>
+            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#newAgentModal">
+                <i class="bi bi-plus"></i> Nuova Sonda
+            </button>
+        </div>
+        <div class="card table-modern">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Nome</th>
+                        <th>Tipo</th>
+                        <th>Indirizzo</th>
+                        <th>Sede</th>
+                        <th>Stato</th>
+                        <th>Ultima Conn.</th>
+                        <th>Azioni</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for agent in agents %}
+                    <tr>
+                        <td>
+                            <strong>{{ agent.name }}</strong>
+                            {% if agent.version %}
+                            <br><small class="text-muted">v{{ agent.version }}</small>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% set agent_type = agent.agent_type if agent.agent_type else 'mikrotik' %}
+                            {% if agent_type == 'docker' %}
+                            <span class="badge bg-info">
+                                <i class="bi bi-box"></i> Docker
+                            </span>
+                            {% else %}
+                            <span class="badge bg-primary">
+                                <i class="bi bi-router"></i> MikroTik
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <code>{{ agent.address }}</code>
+                            <br>
+                            <small class="text-muted">
+                                {% set agent_type = agent.agent_type if agent.agent_type else 'mikrotik' %}
+                                {% if agent_type == 'docker' %}
+                                <i class="bi bi-globe"></i> API:{{ agent.agent_api_port if agent.agent_api_port else 8080 }}
+                                {% elif agent.connection_type == 'api' %}
+                                <i class="bi bi-hdd-network"></i> API:{{ agent.port }}
+                                {% elif agent.connection_type == 'ssh' %}
+                                <i class="bi bi-terminal"></i> SSH:{{ agent.ssh_port }}
+                                {% else %}
+                                <i class="bi bi-hdd-network"></i> API:{{ agent.port }} 
+                                <i class="bi bi-terminal"></i> SSH:{{ agent.ssh_port }}
+                                {% endif %}
+                                {% if agent.dns_server %}
+                                <br><i class="bi bi-server"></i> DNS: {{ agent.dns_server }}
+                                {% endif %}
+                            </small>
+                        </td>
+                        <td>{{ agent.site_name or agent.location or '-' }}</td>
+                        <td>
+                            {% if agent.status == 'online' %}
+                            <span class="badge bg-success">Online</span>
+                            {% elif agent.status == 'offline' %}
+                            <span class="badge bg-danger">Offline</span>
+                            {% elif agent.status == 'partial' %}
+                            <span class="badge bg-warning">Parziale</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ agent.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ agent.last_seen.strftime('%d/%m %H:%M') if agent.last_seen else '-' }}</td>
+                        <td>
+                            {% set agent_type = agent.agent_type if agent.agent_type else 'mikrotik' %}
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button class="btn btn-outline-primary" onclick="testAgent('{{ agent.id }}')" title="Test connessione">
+                                    <i class="bi bi-wifi"></i>
+                                </button>
+                                {% if agent_type == 'docker' %}
+                                <button class="btn btn-outline-info" onclick="showAgentCapabilities('{{ agent.id }}')" title="Capacità Agent">
+                                    <i class="bi bi-cpu"></i>
+                                </button>
+                                {% endif %}
+                                {% if agent_type == 'mikrotik' and agent.connection_type in ['ssh', 'both'] %}
+                                <button class="btn btn-outline-secondary" onclick="openSshTerminal('{{ agent.id }}')" title="Terminale SSH">
+                                    <i class="bi bi-terminal"></i>
+                                </button>
+                                {% endif %}
+                                <button class="btn btn-outline-success" onclick="scanCustomerNetworks('{{ agent.id }}')" title="Scansiona reti cliente">
+                                    <i class="bi bi-search"></i>
+                                </button>
+                                {% if agent_type == 'docker' %}
+                                <button class="btn btn-outline-warning" onclick="autoDetectWithAgent('{{ agent.id }}')" title="Auto-Detect Dispositivi">
+                                    <i class="bi bi-bullseye"></i>
+                                </button>
+                                {% endif %}
+                                {% if agent_type == 'mikrotik' %}
+                                <a href="/customers/{{ customer.id }}/agents/{{ agent.id }}/mikrotik" class="btn btn-outline-info" title="Gestione MikroTik">
+                                    <i class="bi bi-router"></i>
+                                </a>
+                                {% endif %}
+                                <button class="btn btn-outline-secondary" onclick="editAgent('{{ agent.id }}')" title="Modifica">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn btn-outline-danger" onclick="deleteAgent('{{ agent.id }}')" title="Elimina">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7" class="text-center py-4 text-muted">Nessuna sonda configurata</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- Tab Device -->
+    <div class="tab-pane fade" id="devices">
+        <div class="d-flex justify-content-between mb-3">
+            <h5>Device Assegnati</h5>
+            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#assignDeviceModal">
+                <i class="bi bi-plus"></i> Assegna Device
+            </button>
+        </div>
+        <div class="card table-modern">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Dude ID</th>
+                        <th>Nome</th>
+                        <th>Ruolo</th>
+                        <th>Location</th>
+                        <th>IP Management</th>
+                        <th>SLA</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for dev in devices %}
+                    <tr>
+                        <td><code>{{ dev.dude_device_id }}</code></td>
+                        <td><strong>{{ dev.local_name or dev.dude_device_name or '-' }}</strong></td>
+                        <td>
+                            {% if dev.role %}
+                            <span class="badge bg-info">{{ dev.role }}</span>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                        <td>{{ dev.location or '-' }}</td>
+                        <td><code>{{ dev.management_ip or '-' }}</code></td>
+                        <td>
+                            {% if dev.sla_level %}
+                            <span class="badge bg-{% if dev.sla_level == 'gold' %}warning{% elif dev.sla_level == 'silver' %}secondary{% else %}dark{% endif %}">
+                                {{ dev.sla_level }}
+                            </span>
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="text-center py-4 text-muted">Nessun device assegnato</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <!-- Tab Inventario -->
+    <div class="tab-pane fade" id="inventory">
+        <!-- Card Discovery -->
+        <div class="card mb-4">
+            <div class="card-header bg-primary text-white">
+                <h6 class="mb-0"><i class="bi bi-search me-2"></i>Discovery & Import Dispositivi</h6>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Rete da scansionare</label>
+                        <select class="form-select" id="discoveryNetwork">
+                            <option value="">-- Seleziona rete --</option>
+                            {% for net in networks %}
+                            <option value="{{ net.ip_network }}">{{ net.name }} ({{ net.ip_network }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Sonda MikroTik</label>
+                        <select class="form-select" id="discoveryAgent">
+                            <option value="">-- Seleziona sonda --</option>
+                            {% for agent in agents %}
+                            <option value="{{ agent.id }}">{{ agent.name }} ({{ agent.address }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Credenziali per identificazione</label>
+                        <select class="form-select" id="discoveryCredentials" multiple size="2">
+                            {% for cred in credentials %}
+                            <option value="{{ cred.id }}" {% if cred.credential_type in ['ssh', 'snmp', 'mikrotik'] %}selected{% endif %}>
+                                {{ cred.name }} ({{ cred.credential_type }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2 d-flex align-items-end">
+                        <button class="btn btn-primary w-100" onclick="runCustomerDiscovery()">
+                            <i class="bi bi-search me-1"></i>Scansiona
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Risultati Discovery -->
+                <div id="discoverySection" style="display: none;">
+                    <hr>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0">
+                            <span id="discoveryDeviceCount">0</span> dispositivi trovati
+                            <span id="discoveryIdentifiedBadge" class="badge bg-success ms-2" style="display: none;">0 identificati</span>
+                        </h6>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-outline-warning" onclick="identifyDiscoveredDevices()">
+                                <i class="bi bi-cpu me-1"></i>Identifica
+                            </button>
+                            <button class="btn btn-outline-primary" onclick="selectAllDiscovered()">
+                                <i class="bi bi-check-all"></i>
+                            </button>
+                            <button class="btn btn-success" onclick="importDiscoveredDevices()">
+                                <i class="bi bi-download me-1"></i>Importa
+                            </button>
+                        </div>
+                    </div>
+                    <div class="table-responsive" style="max-height: 400px; overflow: auto;">
+                        <table class="table table-sm table-hover mb-0" style="min-width: 900px;">
+                            <thead class="sticky-top bg-white">
+                                <tr>
+                                    <th width="30"><input type="checkbox" id="selectAllDiscoveredCb" onchange="toggleAllDiscovered()"></th>
+                                    <th width="120">IP</th>
+                                    <th width="140">MAC</th>
+                                    <th width="100">Vendor</th>
+                                    <th width="100">Tipo</th>
+                                    <th width="110">Credenziali</th>
+                                    <th width="150">Hostname</th>
+                                    <th width="200">Servizi</th>
+                                    <th width="150">Stato</th>
+                                </tr>
+                            </thead>
+                            <tbody id="discoveryResultsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div id="discoveryLoading" class="text-center py-3" style="display: none;">
+                    <div class="spinner-border spinner-border-sm text-primary me-2"></div>
+                    <span id="discoveryLoadingText">Scansione in corso...</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Card Inventario Esistente -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-collection me-2"></i>Dispositivi Inventariati</h6>
+                <div>
+                    <select class="form-select form-select-sm d-inline-block w-auto me-2" id="inventoryTypeFilter" onchange="loadInventory()">
+                        <option value="">Tutti i tipi</option>
+                        <option value="mikrotik">MikroTik</option>
+                        <option value="windows">Windows</option>
+                        <option value="linux">Linux</option>
+                        <option value="network">Apparati Rete</option>
+                        <option value="printer">Stampanti</option>
+                        <option value="camera">Telecamere</option>
+                        <option value="voip">VoIP</option>
+                        <option value="other">Altri</option>
+                    </select>
+                    <button class="btn btn-warning btn-sm me-2" onclick="batchAutoDetect()" title="Auto-detect su tutti i dispositivi (usa credenziali default + porte rilevate)">
+                        <i class="bi bi-bullseye"></i> Auto-Detect
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm me-2" onclick="batchScanPorts()" title="Scansiona porte di tutti i dispositivi">
+                        <i class="bi bi-router"></i> Scansiona Porte
+                    </button>
+                    <button class="btn btn-outline-danger btn-sm me-2" onclick="clearInventory()" title="Svuota inventario">
+                        <i class="bi bi-trash"></i> Svuota
+                    </button>
+                    <button class="btn btn-outline-primary btn-sm" onclick="loadInventory()">
+                        <i class="bi bi-arrow-clockwise"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div id="inventoryLoading" class="text-center py-4" style="display: none;">
+                    <div class="spinner-border text-primary" role="status"></div>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table class="table table-hover mb-0" id="inventoryTable" style="min-width: 1400px;">
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>Hostname</th>
+                                <th>IP</th>
+                                <th>MAC</th>
+                                <th>Tipo</th>
+                                <th>Categoria</th>
+                                <th>OS</th>
+                                <th>Versione</th>
+                                <th>Vendor</th>
+                                <th>Servizi</th>
+                                <th>Credenziali</th>
+                                <th>Identificato</th>
+                                <th>Stato</th>
+                                <th>Azioni</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventoryBody">
+                            <tr><td colspan="13" class="text-center py-4 text-muted">Clicca su "Inventario" per caricare i dispositivi</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nuova Rete -->
+<div class="modal fade" id="newNetworkModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nuova Rete</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="newNetworkForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Nome *</label>
+                        <input type="text" class="form-control" name="name" required placeholder="LAN Uffici">
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Tipo</label>
+                            <select class="form-select" name="network_type">
+                                <option value="lan">LAN</option>
+                                <option value="wan">WAN</option>
+                                <option value="dmz">DMZ</option>
+                                <option value="guest">Guest</option>
+                                <option value="management">Management</option>
+                                <option value="voip">VoIP</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">VLAN ID</label>
+                            <input type="number" class="form-control" name="vlan_id" min="1" max="4094">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Network CIDR *</label>
+                        <input type="text" class="form-control" name="ip_network" required placeholder="192.168.1.0/24">
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Gateway</label>
+                            <input type="text" class="form-control" name="gateway" placeholder="192.168.1.1">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">DNS Primario</label>
+                            <input type="text" class="form-control" name="dns_primary" placeholder="8.8.8.8">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary">Crea Rete</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nuova Credenziale -->
+<div class="modal fade" id="newCredentialModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Nuova Credenziale</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="newCredentialForm">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Nome *</label>
+                            <input type="text" class="form-control" name="name" required placeholder="Es: Admin SSH Linux">
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Tipo *</label>
+                            <select class="form-select" name="credential_type" id="credentialType" onchange="toggleCredentialFields()">
+                                <option value="ssh">SSH</option>
+                                <option value="snmp">SNMP</option>
+                                <option value="wmi">WMI (Windows)</option>
+                                <option value="mikrotik">MikroTik API</option>
+                                <option value="device">Device Generico</option>
+                                <option value="api">API</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 mb-3">
+                            <label class="form-label">Default</label>
+                            <div class="form-check mt-2">
+                                <input type="checkbox" class="form-check-input" name="is_default" id="isDefault">
+                                <label class="form-check-label" for="isDefault">Sì</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi comuni (username/password) -->
+                    <div id="fieldsCommon">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Username</label>
+                                <input type="text" class="form-control" name="username" placeholder="admin">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Password</label>
+                                <input type="password" class="form-control" name="password">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi SSH -->
+                    <div id="fieldsSSH" style="display: block;">
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Porta SSH</label>
+                                <input type="number" class="form-control" name="ssh_port" value="22" min="1" max="65535">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Tipo Chiave</label>
+                                <select class="form-select" name="ssh_key_type">
+                                    <option value="">Password</option>
+                                    <option value="rsa">RSA</option>
+                                    <option value="ed25519">Ed25519</option>
+                                    <option value="ecdsa">ECDSA</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Passphrase Chiave</label>
+                                <input type="password" class="form-control" name="ssh_passphrase" placeholder="(opzionale)">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Chiave Privata SSH</label>
+                            <textarea class="form-control" name="ssh_private_key" rows="3" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"></textarea>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi SNMP -->
+                    <div id="fieldsSNMP" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Versione SNMP</label>
+                                <select class="form-select" name="snmp_version" id="snmpVersion" onchange="toggleSNMPv3Fields()">
+                                    <option value="2c">v2c</option>
+                                    <option value="1">v1</option>
+                                    <option value="3">v3</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Porta SNMP</label>
+                                <input type="number" class="form-control" name="snmp_port" value="161" min="1" max="65535">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Community</label>
+                                <input type="text" class="form-control" name="snmp_community" placeholder="public">
+                            </div>
+                        </div>
+                        <!-- Campi SNMPv3 -->
+                        <div id="fieldsSNMPv3" style="display: none;">
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Security Level</label>
+                                    <select class="form-select" name="snmp_security_level">
+                                        <option value="noAuthNoPriv">noAuthNoPriv</option>
+                                        <option value="authNoPriv">authNoPriv</option>
+                                        <option value="authPriv">authPriv</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Auth Protocol</label>
+                                    <select class="form-select" name="snmp_auth_protocol">
+                                        <option value="">-</option>
+                                        <option value="MD5">MD5</option>
+                                        <option value="SHA">SHA</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Priv Protocol</label>
+                                    <select class="form-select" name="snmp_priv_protocol">
+                                        <option value="">-</option>
+                                        <option value="DES">DES</option>
+                                        <option value="AES">AES</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Auth Password</label>
+                                    <input type="password" class="form-control" name="snmp_auth_password">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Priv Password</label>
+                                    <input type="password" class="form-control" name="snmp_priv_password">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi WMI -->
+                    <div id="fieldsWMI" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Dominio</label>
+                                <input type="text" class="form-control" name="wmi_domain" placeholder="DOMAIN o . per locale">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Namespace</label>
+                                <input type="text" class="form-control" name="wmi_namespace" placeholder="root/cimv2" value="root/cimv2">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi MikroTik -->
+                    <div id="fieldsMikroTik" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Porta API</label>
+                                <input type="number" class="form-control" name="mikrotik_api_port" value="8728" min="1" max="65535">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">SSL</label>
+                                <div class="form-check mt-2">
+                                    <input type="checkbox" class="form-check-input" name="mikrotik_api_ssl" id="mikrotikSsl">
+                                    <label class="form-check-label" for="mikrotikSsl">Usa SSL (porta 8729)</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi API -->
+                    <div id="fieldsAPI" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">API Key</label>
+                                <input type="text" class="form-control" name="api_key">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">API Secret</label>
+                                <input type="password" class="form-control" name="api_secret">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Endpoint</label>
+                            <input type="url" class="form-control" name="api_endpoint" placeholder="https://api.example.com">
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    <div class="mb-3">
+                        <label class="form-label">Filtro Device</label>
+                        <input type="text" class="form-control" name="device_filter" placeholder="router-*, *-fw">
+                        <small class="text-muted">Pattern per matching (usa * come wildcard)</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Descrizione</label>
+                        <textarea class="form-control" name="description" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary">Crea Credenziale</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleCredentialFields() {
+    const type = document.getElementById('credentialType').value;
+    
+    // Nascondi tutti i campi specifici
+    document.getElementById('fieldsSSH').style.display = 'none';
+    document.getElementById('fieldsSNMP').style.display = 'none';
+    document.getElementById('fieldsWMI').style.display = 'none';
+    document.getElementById('fieldsMikroTik').style.display = 'none';
+    document.getElementById('fieldsAPI').style.display = 'none';
+    document.getElementById('fieldsCommon').style.display = 'block';
+    
+    // Mostra i campi per il tipo selezionato
+    if (type === 'ssh') {
+        document.getElementById('fieldsSSH').style.display = 'block';
+    } else if (type === 'snmp') {
+        document.getElementById('fieldsSNMP').style.display = 'block';
+        document.getElementById('fieldsCommon').style.display = 'none';
+    } else if (type === 'wmi') {
+        document.getElementById('fieldsWMI').style.display = 'block';
+    } else if (type === 'mikrotik') {
+        document.getElementById('fieldsMikroTik').style.display = 'block';
+    } else if (type === 'api') {
+        document.getElementById('fieldsAPI').style.display = 'block';
+        document.getElementById('fieldsCommon').style.display = 'none';
+    }
+}
+
+function toggleSNMPv3Fields() {
+    const version = document.getElementById('snmpVersion').value;
+    document.getElementById('fieldsSNMPv3').style.display = version === '3' ? 'block' : 'none';
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', function() {
+    toggleCredentialFields();
+});
+</script>
+
+<!-- Modal Modifica Credenziale -->
+<div class="modal fade" id="editCredentialModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Modifica Credenziale</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editCredentialForm">
+                <input type="hidden" name="credential_id" id="editCredentialId">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Nome *</label>
+                            <input type="text" class="form-control" name="name" id="editCredName" required>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Tipo *</label>
+                            <select class="form-select" name="credential_type" id="editCredType" onchange="toggleEditCredentialFields()">
+                                <option value="ssh">SSH</option>
+                                <option value="snmp">SNMP</option>
+                                <option value="wmi">WMI (Windows)</option>
+                                <option value="mikrotik">MikroTik API</option>
+                                <option value="device">Device Generico</option>
+                                <option value="api">API</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2 mb-3">
+                            <label class="form-label">Default</label>
+                            <div class="form-check mt-2">
+                                <input type="checkbox" class="form-check-input" name="is_default" id="editIsDefault">
+                                <label class="form-check-label" for="editIsDefault">Sì</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi comuni -->
+                    <div id="editFieldsCommon">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Username</label>
+                                <input type="text" class="form-control" name="username" id="editUsername">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Password <small class="text-muted">(lascia vuoto per non modificare)</small></label>
+                                <input type="password" class="form-control" name="password" id="editPassword" placeholder="••••••••">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi SSH -->
+                    <div id="editFieldsSSH" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Porta SSH</label>
+                                <input type="number" class="form-control" name="ssh_port" id="editSshPort" min="1" max="65535">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Tipo Chiave</label>
+                                <select class="form-select" name="ssh_key_type" id="editSshKeyType">
+                                    <option value="">Password</option>
+                                    <option value="rsa">RSA</option>
+                                    <option value="ed25519">Ed25519</option>
+                                    <option value="ecdsa">ECDSA</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Passphrase</label>
+                                <input type="password" class="form-control" name="ssh_passphrase" id="editSshPassphrase">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Chiave Privata SSH <small class="text-muted">(lascia vuoto per non modificare)</small></label>
+                            <textarea class="form-control" name="ssh_private_key" id="editSshPrivateKey" rows="3"></textarea>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi SNMP -->
+                    <div id="editFieldsSNMP" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Versione SNMP</label>
+                                <select class="form-select" name="snmp_version" id="editSnmpVersion" onchange="toggleEditSNMPv3Fields()">
+                                    <option value="2c">v2c</option>
+                                    <option value="1">v1</option>
+                                    <option value="3">v3</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Porta SNMP</label>
+                                <input type="number" class="form-control" name="snmp_port" id="editSnmpPort" min="1" max="65535">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Community</label>
+                                <input type="text" class="form-control" name="snmp_community" id="editSnmpCommunity">
+                            </div>
+                        </div>
+                        <div id="editFieldsSNMPv3" style="display: none;">
+                            <div class="row">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Security Level</label>
+                                    <select class="form-select" name="snmp_security_level" id="editSnmpSecurityLevel">
+                                        <option value="noAuthNoPriv">noAuthNoPriv</option>
+                                        <option value="authNoPriv">authNoPriv</option>
+                                        <option value="authPriv">authPriv</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Auth Protocol</label>
+                                    <select class="form-select" name="snmp_auth_protocol" id="editSnmpAuthProtocol">
+                                        <option value="">-</option>
+                                        <option value="MD5">MD5</option>
+                                        <option value="SHA">SHA</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Priv Protocol</label>
+                                    <select class="form-select" name="snmp_priv_protocol" id="editSnmpPrivProtocol">
+                                        <option value="">-</option>
+                                        <option value="DES">DES</option>
+                                        <option value="AES">AES</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Auth Password</label>
+                                    <input type="password" class="form-control" name="snmp_auth_password" id="editSnmpAuthPassword">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Priv Password</label>
+                                    <input type="password" class="form-control" name="snmp_priv_password" id="editSnmpPrivPassword">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi WMI -->
+                    <div id="editFieldsWMI" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Dominio</label>
+                                <input type="text" class="form-control" name="wmi_domain" id="editWmiDomain">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Namespace</label>
+                                <input type="text" class="form-control" name="wmi_namespace" id="editWmiNamespace">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi MikroTik -->
+                    <div id="editFieldsMikroTik" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Porta API</label>
+                                <input type="number" class="form-control" name="mikrotik_api_port" id="editMikrotikApiPort" min="1" max="65535">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">SSL</label>
+                                <div class="form-check mt-2">
+                                    <input type="checkbox" class="form-check-input" name="mikrotik_api_ssl" id="editMikrotikSsl">
+                                    <label class="form-check-label" for="editMikrotikSsl">Usa SSL</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi API -->
+                    <div id="editFieldsAPI" style="display: none;">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">API Key</label>
+                                <input type="text" class="form-control" name="api_key" id="editApiKey">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">API Secret</label>
+                                <input type="password" class="form-control" name="api_secret" id="editApiSecret">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Endpoint</label>
+                            <input type="url" class="form-control" name="api_endpoint" id="editApiEndpoint">
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Filtro Device</label>
+                            <input type="text" class="form-control" name="device_filter" id="editDeviceFilter">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Stato</label>
+                            <div class="form-check mt-2">
+                                <input type="checkbox" class="form-check-input" name="active" id="editActive">
+                                <label class="form-check-label" for="editActive">Attiva</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Descrizione</label>
+                        <textarea class="form-control" name="description" id="editDescription" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary">Salva Modifiche</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleEditCredentialFields() {
+    const type = document.getElementById('editCredType').value;
+    
+    document.getElementById('editFieldsSSH').style.display = 'none';
+    document.getElementById('editFieldsSNMP').style.display = 'none';
+    document.getElementById('editFieldsWMI').style.display = 'none';
+    document.getElementById('editFieldsMikroTik').style.display = 'none';
+    document.getElementById('editFieldsAPI').style.display = 'none';
+    document.getElementById('editFieldsCommon').style.display = 'block';
+    
+    if (type === 'ssh') {
+        document.getElementById('editFieldsSSH').style.display = 'block';
+    } else if (type === 'snmp') {
+        document.getElementById('editFieldsSNMP').style.display = 'block';
+        document.getElementById('editFieldsCommon').style.display = 'none';
+    } else if (type === 'wmi') {
+        document.getElementById('editFieldsWMI').style.display = 'block';
+    } else if (type === 'mikrotik') {
+        document.getElementById('editFieldsMikroTik').style.display = 'block';
+    } else if (type === 'api') {
+        document.getElementById('editFieldsAPI').style.display = 'block';
+        document.getElementById('editFieldsCommon').style.display = 'none';
+    }
+}
+
+function toggleEditSNMPv3Fields() {
+    const version = document.getElementById('editSnmpVersion').value;
+    document.getElementById('editFieldsSNMPv3').style.display = version === '3' ? 'block' : 'none';
+}
+
+async function editCredential(credentialId) {
+    try {
+        // Carica dati credenziale
+        const response = await fetch(`/api/v1/customers/credentials/${credentialId}`);
+        if (!response.ok) throw new Error('Credenziale non trovata');
+        
+        const cred = await response.json();
+        
+        // Popola form
+        document.getElementById('editCredentialId').value = cred.id;
+        document.getElementById('editCredName').value = cred.name || '';
+        document.getElementById('editCredType').value = cred.credential_type || 'device';
+        document.getElementById('editIsDefault').checked = cred.is_default || false;
+        document.getElementById('editUsername').value = cred.username || '';
+        document.getElementById('editPassword').value = '';
+        document.getElementById('editDeviceFilter').value = cred.device_filter || '';
+        document.getElementById('editActive').checked = cred.active !== false;
+        document.getElementById('editDescription').value = cred.description || '';
+        
+        // SSH
+        document.getElementById('editSshPort').value = cred.ssh_port || 22;
+        document.getElementById('editSshKeyType').value = cred.ssh_key_type || '';
+        document.getElementById('editSshPassphrase').value = '';
+        document.getElementById('editSshPrivateKey').value = '';
+        
+        // SNMP
+        document.getElementById('editSnmpVersion').value = cred.snmp_version || '2c';
+        document.getElementById('editSnmpPort').value = cred.snmp_port || 161;
+        document.getElementById('editSnmpCommunity').value = cred.snmp_community || '';
+        document.getElementById('editSnmpSecurityLevel').value = cred.snmp_security_level || 'noAuthNoPriv';
+        document.getElementById('editSnmpAuthProtocol').value = cred.snmp_auth_protocol || '';
+        document.getElementById('editSnmpPrivProtocol').value = cred.snmp_priv_protocol || '';
+        
+        // WMI
+        document.getElementById('editWmiDomain').value = cred.wmi_domain || '';
+        document.getElementById('editWmiNamespace').value = cred.wmi_namespace || 'root/cimv2';
+        
+        // MikroTik
+        document.getElementById('editMikrotikApiPort').value = cred.mikrotik_api_port || 8728;
+        document.getElementById('editMikrotikSsl').checked = cred.mikrotik_api_ssl || false;
+        
+        // API
+        document.getElementById('editApiKey').value = '';
+        document.getElementById('editApiSecret').value = '';
+        document.getElementById('editApiEndpoint').value = cred.api_endpoint || '';
+        
+        // Mostra campi appropriati
+        toggleEditCredentialFields();
+        toggleEditSNMPv3Fields();
+        
+        // Mostra modal
+        new bootstrap.Modal(document.getElementById('editCredentialModal')).show();
+        
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+async function deleteCredential(credentialId, credentialName) {
+    if (!confirm(`Eliminare la credenziale "${credentialName}"?`)) return;
+    
+    try {
+        const response = await fetch(`/api/v1/customers/credentials/${credentialId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const err = await response.json();
+            alert('Errore: ' + (err.detail || 'Eliminazione fallita'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+// Form Modifica Credenziale
+document.getElementById('editCredentialForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const credentialId = document.getElementById('editCredentialId').value;
+    const formData = new FormData(e.target);
+    const data = {};
+    
+    // Prendi solo i campi con valore
+    for (const [key, value] of formData.entries()) {
+        if (key === 'credential_id') continue;
+        if (value !== '' && value !== null) {
+            data[key] = value;
+        }
+    }
+    
+    // Gestisci checkbox
+    data.is_default = document.getElementById('editIsDefault').checked;
+    data.active = document.getElementById('editActive').checked;
+    data.mikrotik_api_ssl = document.getElementById('editMikrotikSsl').checked;
+    
+    // Converti numeri
+    if (data.ssh_port) data.ssh_port = parseInt(data.ssh_port);
+    if (data.snmp_port) data.snmp_port = parseInt(data.snmp_port);
+    if (data.mikrotik_api_port) data.mikrotik_api_port = parseInt(data.mikrotik_api_port);
+    
+    console.log('Update credential:', data);
+    
+    try {
+        const response = await fetch(`/api/v1/customers/credentials/${credentialId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('editCredentialModal')).hide();
+            location.reload();
+        } else {
+            const err = await response.json();
+            alert('Errore: ' + (err.detail || JSON.stringify(err)));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+});
+</script>
+
+<!-- Modal Assegna Device -->
+<div class="modal fade" id="assignDeviceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Assegna Device</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="assignDeviceForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Dude Device ID *</label>
+                        <input type="text" class="form-control" name="dude_device_id" required placeholder="*1 o ID del device">
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Nome Device</label>
+                            <input type="text" class="form-control" name="dude_device_name" placeholder="Router-Main">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Ruolo</label>
+                            <select class="form-select" name="role">
+                                <option value="">-- Seleziona --</option>
+                                <option value="router">Router</option>
+                                <option value="switch">Switch</option>
+                                <option value="firewall">Firewall</option>
+                                <option value="access_point">Access Point</option>
+                                <option value="server">Server</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Location</label>
+                            <input type="text" class="form-control" name="location" placeholder="Sede Centrale">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">IP Management</label>
+                            <input type="text" class="form-control" name="management_ip" placeholder="192.168.1.1">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Contratto</label>
+                            <select class="form-select" name="contract_type">
+                                <option value="">-- Seleziona --</option>
+                                <option value="standard">Standard</option>
+                                <option value="premium">Premium</option>
+                                <option value="24x7">24x7</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">SLA</label>
+                            <select class="form-select" name="sla_level">
+                                <option value="">-- Seleziona --</option>
+                                <option value="gold">Gold</option>
+                                <option value="silver">Silver</option>
+                                <option value="bronze">Bronze</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary">Assegna</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Nuova Sonda -->
+<div class="modal fade" id="newAgentModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-broadcast"></i> Nuova Sonda</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="newAgentForm">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Nome Sonda *</label>
+                            <input type="text" class="form-control" name="name" required placeholder="Sonda Milano">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Sede</label>
+                            <input type="text" class="form-control" name="site_name" placeholder="Milano HQ">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Indirizzo IP/Hostname *</label>
+                            <input type="text" class="form-control" name="address" required placeholder="192.168.1.1">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Tipo Agent *</label>
+                            <select class="form-select" name="agent_type" id="agentType" onchange="toggleAgentTypeFields()">
+                                <option value="mikrotik">MikroTik (RouterOS nativo)</option>
+                                <option value="docker">Docker Agent (WMI/SSH/SNMP)</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi MikroTik -->
+                    <div id="mikrotikFields">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Tipo Connessione</label>
+                                <select class="form-select" name="connection_type" id="agentConnType" onchange="toggleConnectionFields()">
+                                    <option value="api">Solo API RouterOS</option>
+                                    <option value="ssh">Solo SSH</option>
+                                    <option value="both">API + SSH</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- Campi API RouterOS -->
+                        <div id="apiFields">
+                            <hr><small class="text-muted">Connessione API RouterOS</small>
+                            <div class="row mt-2">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Porta API</label>
+                                    <input type="number" class="form-control" name="port" value="8728">
+                                </div>
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Opzioni API</label>
+                                    <div class="form-check mt-2">
+                                        <input class="form-check-input" type="checkbox" name="use_ssl" id="agentUseSsl">
+                                        <label class="form-check-label" for="agentUseSsl">Usa SSL/TLS (8729)</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Campi SSH -->
+                        <div id="sshFields" style="display:none;">
+                            <hr><small class="text-muted">Connessione SSH</small>
+                            <div class="row mt-2">
+                                <div class="col-md-4 mb-3">
+                                    <label class="form-label">Porta SSH</label>
+                                    <input type="number" class="form-control" name="ssh_port" value="22">
+                                </div>
+                                <div class="col-md-8 mb-3">
+                                    <label class="form-label">Chiave Privata SSH (opzionale)</label>
+                                    <textarea class="form-control" name="ssh_key" rows="2" placeholder="-----BEGIN RSA PRIVATE KEY-----"></textarea>
+                                    <small class="text-muted">Lascia vuoto per usare password</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <hr>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Username</label>
+                                <input type="text" class="form-control" name="username" placeholder="admin">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Password</label>
+                                <input type="password" class="form-control" name="password">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Campi Docker Agent -->
+                    <div id="dockerFields" style="display:none;">
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle"></i> 
+                            <strong>Docker Agent</strong> - Container con capacità avanzate di probing (WMI, SSH, SNMP, Port Scan).
+                            Può essere deployato su MikroTik RouterOS 7 con container o su qualsiasi host Docker.
+                        </div>
+                        <hr><small class="text-muted">Configurazione Docker Agent</small>
+                        <div class="row mt-2">
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label">Porta API Agent</label>
+                                <input type="number" class="form-control" name="agent_api_port" value="8080">
+                            </div>
+                            <div class="col-md-8 mb-3">
+                                <label class="form-label">Token Autenticazione *</label>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" name="agent_token" id="agentToken" placeholder="token-segreto">
+                                    <button class="btn btn-outline-secondary" type="button" onclick="generateAgentToken()">
+                                        <i class="bi bi-shuffle"></i> Genera
+                                    </button>
+                                </div>
+                                <small class="text-muted">Deve corrispondere al token configurato nell'agent</small>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">URL Agent (opzionale)</label>
+                                <input type="text" class="form-control" name="agent_url" placeholder="http://192.168.1.1:8080">
+                                <small class="text-muted">Lascia vuoto per usare http://{indirizzo}:{porta}</small>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">DNS Server</label>
+                                <input type="text" class="form-control" name="dns_server" placeholder="192.168.1.1">
+                                <small class="text-muted">IP del DNS locale per reverse lookup</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Tipo Scansione Default</label>
+                            <select class="form-select" name="default_scan_type">
+                                <option value="ping">Ping (veloce)</option>
+                                <option value="arp">ARP (rete locale)</option>
+                                <option value="snmp">SNMP (dettagliato)</option>
+                                <option value="all">Completa</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Opzioni Discovery</label>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" name="auto_add_devices" id="agentAutoAdd">
+                                <label class="form-check-label" for="agentAutoAdd">Aggiungi device automaticamente</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Note</label>
+                        <textarea class="form-control" name="notes" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary">Crea Sonda</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const customerId = '{{ customer.id }}';
+
+// Form Nuova Rete
+document.getElementById('newNetworkForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const data = Object.fromEntries(formData.entries());
+    if (data.vlan_id) data.vlan_id = parseInt(data.vlan_id);
+    
+    const response = await fetch(`/api/v1/customers/${customerId}/networks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    
+    if (response.ok) location.reload();
+    else alert('Errore: ' + (await response.json()).detail);
+});
+
+// Form Nuova Credenziale
+document.getElementById('newCredentialForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const data = Object.fromEntries(formData.entries());
+    
+    // Gestisci checkbox
+    data.is_default = e.target.is_default.checked;
+    data.mikrotik_api_ssl = e.target.mikrotik_api_ssl?.checked || false;
+    
+    // Converti numeri
+    if (data.ssh_port) data.ssh_port = parseInt(data.ssh_port);
+    if (data.snmp_port) data.snmp_port = parseInt(data.snmp_port);
+    if (data.mikrotik_api_port) data.mikrotik_api_port = parseInt(data.mikrotik_api_port);
+    
+    // Rimuovi campi vuoti
+    Object.keys(data).forEach(k => { 
+        if (data[k] === '' || data[k] === null || data[k] === undefined) delete data[k]; 
+    });
+    
+    console.log('Credential data:', data);
+    
+    const response = await fetch(`/api/v1/customers/${customerId}/credentials`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    
+    if (response.ok) {
+        bootstrap.Modal.getInstance(document.getElementById('newCredentialModal')).hide();
+        location.reload();
+    } else {
+        const err = await response.json();
+        alert('Errore: ' + (err.detail || JSON.stringify(err)));
+    }
+});
+
+// Form Assegna Device
+document.getElementById('assignDeviceForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const data = Object.fromEntries(formData.entries());
+    
+    // Rimuovi campi vuoti
+    Object.keys(data).forEach(k => { if (!data[k]) delete data[k]; });
+    
+    const response = await fetch(`/api/v1/customers/${customerId}/devices`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    
+    if (response.ok) location.reload();
+    else alert('Errore: ' + (await response.json()).detail);
+});
+
+// Form Nuova Sonda
+document.getElementById('newAgentForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const data = Object.fromEntries(formData.entries());
+    
+    // Converti checkbox
+    if (e.target.use_ssl) data.use_ssl = e.target.use_ssl.checked;
+    if (e.target.auto_add_devices) data.auto_add_devices = e.target.auto_add_devices.checked;
+    
+    // Converti porte a numero
+    if (data.port) data.port = parseInt(data.port);
+    if (data.ssh_port) data.ssh_port = parseInt(data.ssh_port);
+    if (data.agent_api_port) data.agent_api_port = parseInt(data.agent_api_port);
+    
+    // Rimuovi campi vuoti
+    Object.keys(data).forEach(k => { if (data[k] === '' || data[k] === null) delete data[k]; });
+    
+    console.log('Agent data:', data);
+    
+    const response = await fetch(`/api/v1/customers/${customerId}/agents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+    
+    if (response.ok) location.reload();
+    else alert('Errore: ' + (await response.json()).detail);
+});
+
+// Toggle campi in base al tipo Agent (MikroTik vs Docker)
+function toggleAgentTypeFields() {
+    const agentType = document.getElementById('agentType').value;
+    const mikrotikFields = document.getElementById('mikrotikFields');
+    const dockerFields = document.getElementById('dockerFields');
+    
+    if (agentType === 'docker') {
+        mikrotikFields.style.display = 'none';
+        dockerFields.style.display = 'block';
+    } else {
+        mikrotikFields.style.display = 'block';
+        dockerFields.style.display = 'none';
+    }
+}
+
+// Genera token casuale per agent Docker
+function generateAgentToken() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let token = '';
+    for (let i = 0; i < 32; i++) {
+        token += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    document.getElementById('agentToken').value = token;
+}
+
+// Toggle campi API/SSH in base al tipo connessione
+function toggleConnectionFields() {
+    const connType = document.getElementById('agentConnType').value;
+    const apiFields = document.getElementById('apiFields');
+    const sshFields = document.getElementById('sshFields');
+    
+    apiFields.style.display = (connType === 'api' || connType === 'both') ? 'block' : 'none';
+    sshFields.style.display = (connType === 'ssh' || connType === 'both') ? 'block' : 'none';
+}
+
+// Mostra capacità agent Docker
+async function showAgentCapabilities(agentId) {
+    try {
+        const response = await fetch(`/api/v1/customers/agents/${agentId}/test`, { method: 'POST' });
+        const result = await response.json();
+        
+        if (result.results && result.results.docker) {
+            const info = result.results.docker;
+            let msg = `Docker Agent: ${result.status}\n\n`;
+            msg += `Agent ID: ${info.agent_id || 'N/A'}\n`;
+            msg += `Nome: ${info.agent_name || 'N/A'}\n`;
+            msg += `Versione: ${info.version || 'N/A'}\n`;
+            if (info.capabilities) {
+                msg += `\nCapacità:\n`;
+                info.capabilities.forEach(cap => {
+                    msg += `  ✓ ${cap.toUpperCase()}\n`;
+                });
+            }
+            alert(msg);
+        } else {
+            alert('Agent non raggiungibile o non è un Docker Agent');
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+// Auto-Detect dispositivi usando agent Docker
+async function autoDetectWithAgent(agentId) {
+    const address = prompt('Inserisci IP del dispositivo da identificare:', '');
+    if (!address) return;
+    
+    const btn = event.target.closest('button');
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch(`/api/v1/inventory/auto-detect?customer_id=${customerId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                address: address,
+                use_default_credentials: true,
+                use_agent: true,
+                agent_id: agentId
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.scan_result) {
+            const sr = result.scan_result;
+            let msg = `Dispositivo identificato!\n\n`;
+            msg += `Indirizzo: ${sr.address || address}\n`;
+            msg += `Tipo: ${sr.device_type || 'unknown'}\n`;
+            msg += `Categoria: ${sr.category || 'N/A'}\n`;
+            msg += `Hostname: ${sr.hostname || 'N/A'}\n`;
+            msg += `OS: ${sr.os_name || sr.os_family || 'N/A'}\n`;
+            msg += `Vendor: ${sr.vendor || sr.manufacturer || 'N/A'}\n`;
+            msg += `Model: ${sr.model || 'N/A'}\n`;
+            msg += `Identificato via: ${sr.identified_by || 'N/A'}\n`;
+            
+            if (result.open_ports && result.open_ports.length > 0) {
+                const openPorts = result.open_ports.filter(p => p.open).map(p => p.port);
+                msg += `\nPorte aperte: ${openPorts.join(', ')}\n`;
+            }
+            
+            if (confirm(msg + '\n\nVuoi importare questo dispositivo nell\'inventario?')) {
+                // Importa nell'inventario
+                const importResponse = await fetch(`/api/v1/inventory/devices?customer_id=${customerId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        address: sr.address || address,
+                        name: sr.hostname || sr.sysName || address,
+                        hostname: sr.hostname,
+                        device_type: sr.device_type || 'other',
+                        category: sr.category,
+                        os_family: sr.os_family,
+                        os_version: sr.os_version,
+                        open_ports: result.open_ports
+                    })
+                });
+                
+                if (importResponse.ok) {
+                    alert('Dispositivo importato con successo!');
+                    location.reload();
+                } else {
+                    alert('Errore durante l\'importazione');
+                }
+            }
+        } else {
+            alert('Dispositivo non identificato.\n\nErrore: ' + (result.error || 'Nessuna informazione'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    } finally {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+    }
+}
+
+// Modifica agent esistente
+async function editAgent(agentId) {
+    // Carica dati agent
+    const response = await fetch(`/api/v1/customers/agents/${agentId}?include_password=false`);
+    if (!response.ok) {
+        alert('Errore caricamento agent');
+        return;
+    }
+    const agent = await response.json();
+    
+    // Popola form e apri modal
+    const form = document.getElementById('newAgentForm');
+    form.name.value = agent.name || '';
+    form.site_name.value = agent.site_name || '';
+    form.address.value = agent.address || '';
+    
+    // Imposta tipo agent
+    const agentType = document.getElementById('agentType');
+    agentType.value = agent.agent_type || 'mikrotik';
+    toggleAgentTypeFields();
+    
+    if (agent.agent_type === 'docker') {
+        form.agent_api_port.value = agent.agent_api_port || 8080;
+        form.dns_server.value = agent.dns_server || '';
+    } else {
+        form.connection_type.value = agent.connection_type || 'api';
+        form.port.value = agent.port || 8728;
+        form.ssh_port.value = agent.ssh_port || 22;
+        if (agent.use_ssl) form.use_ssl.checked = true;
+        toggleConnectionFields();
+    }
+    
+    form.username.value = agent.username || '';
+    
+    // Modifica il submit per fare PUT invece di POST
+    form.dataset.editAgentId = agentId;
+    
+    // Apri modal
+    const modal = new bootstrap.Modal(document.getElementById('newAgentModal'));
+    modal.show();
+}
+
+// Test Sonda (API, SSH o Docker)
+async function testAgent(agentId) {
+    const btn = event.target.closest('button');
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch(`/api/v1/customers/agents/${agentId}/test`, { method: 'POST' });
+        const result = await response.json();
+        
+        let msg = `Test ${result.connection_type.toUpperCase()}: ${result.status}\n\n`;
+        
+        // Docker Agent
+        if (result.results && result.results.docker) {
+            const docker = result.results.docker;
+            if (docker.status === 'healthy') {
+                msg += `Docker Agent: ✅ Online\n`;
+                msg += `  Agent ID: ${docker.agent_id || 'N/A'}\n`;
+                msg += `  Nome: ${docker.agent_name || 'N/A'}\n`;
+                msg += `  Versione: ${docker.version || 'N/A'}\n`;
+                if (docker.capabilities) {
+                    msg += `  Capacità: ${docker.capabilities.join(', ')}\n`;
+                }
+            } else {
+                msg += `Docker Agent: ❌ ${docker.error || 'Non raggiungibile'}\n`;
+            }
+        }
+        
+        // MikroTik API
+        if (result.results && result.results.api) {
+            msg += `API: ${result.results.api.success ? '✅' : '❌'} ${result.results.api.message}\n`;
+            if (result.results.api.version) msg += `  Versione: ${result.results.api.version}\n`;
+        }
+        
+        // MikroTik SSH
+        if (result.results && result.results.ssh) {
+            msg += `SSH: ${result.results.ssh.success ? '✅' : '❌'} ${result.results.ssh.message}\n`;
+        }
+        
+        alert(msg);
+        location.reload();
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    } finally {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+    }
+}
+
+// Avvia Scansione
+async function startScan(agentId) {
+    const scanType = prompt('Tipo scansione (ping/arp/snmp/all):', 'ping');
+    if (!scanType) return;
+    
+    try {
+        const response = await fetch(`/api/v1/customers/agents/${agentId}/scan?scan_type=${scanType}`, { 
+            method: 'POST' 
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            alert(`✅ Scansione avviata!\nRete: ${result.network}\nID: ${result.discovery_id}`);
+        } else {
+            alert(`❌ Errore: ${result.error || result.detail}`);
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+// Elimina Sonda
+async function deleteAgent(agentId) {
+    if (!confirm('Vuoi eliminare questa sonda?')) return;
+    
+    const response = await fetch(`/api/v1/customers/agents/${agentId}`, { method: 'DELETE' });
+    if (response.ok) location.reload();
+    else alert('Errore eliminazione');
+}
+
+// Scansiona tutte le reti del cliente
+async function scanCustomerNetworks(agentId) {
+    const scanType = prompt('Tipo scansione (arp/ping/all):', 'arp');
+    if (!scanType) return;
+    
+    
+    try {
+        // Mostra loading
+        const btn = event.target.closest('button');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+        btn.disabled = true;
+        
+        const response = await fetch(
+            `/api/v1/customers/agents/${agentId}/scan-customer-networks?scan_type=${scanType}`, 
+            { method: 'POST' }
+        );
+        const result = await response.json();
+        
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+        
+        if (result.networks_scanned > 0 && result.results[0]?.success) {
+            const r = result.results[0];
+            let msg = `✅ Scansione completata!\n\n`;
+            msg += `Rete: ${r.network_name} (${r.network_cidr})\n`;
+            msg += `Dispositivi trovati: ${r.devices_found}\n\n`;
+            
+            // Mostra primi 10 dispositivi
+            if (r.results && r.results.length > 0) {
+                msg += `Primi dispositivi:\n`;
+                r.results.slice(0, 10).forEach(d => {
+                    const name = d.identity || d.address || 'N/A';
+                    const mac = d.mac_address || '';
+                    msg += `• ${name} - ${d.address || ''} ${mac ? '('+mac+')' : ''}\n`;
+                });
+                if (r.results.length > 10) {
+                    msg += `\n... e altri ${r.results.length - 10} dispositivi`;
+                }
+            }
+            
+            alert(msg);
+            
+            // TODO: Aprire pagina dettagli risultati
+        } else {
+            alert(`❌ Errore: ${result.results?.[0]?.message || result.detail || 'Scansione fallita'}`);
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+// Esegui comando SSH
+async function openSshTerminal(agentId) {
+    const command = prompt('Comando da eseguire via SSH:', '/system identity print');
+    if (!command) return;
+    
+    try {
+        const response = await fetch(`/api/v1/customers/agents/${agentId}/ssh-command?command=${encodeURIComponent(command)}`, {
+            method: 'POST'
+        });
+        const result = await response.json();
+        
+        let msg = `Comando: ${result.command}\n`;
+        msg += `Exit code: ${result.exit_code || 'N/A'}\n\n`;
+        
+        if (result.output) {
+            msg += `Output:\n${result.output}\n`;
+        }
+        if (result.error) {
+            msg += `Errore:\n${result.error}\n`;
+        }
+        
+        alert(msg);
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+// ==========================================
+// DISCOVERY & DEVICE IDENTIFICATION
+// ==========================================
+
+let discoveredDevices = [];
+
+async function runCustomerDiscovery() {
+    const networkSelect = document.getElementById('discoveryNetwork');
+    const agentSelect = document.getElementById('discoveryAgent');
+    
+    const networkCidr = networkSelect ? networkSelect.value : '';
+    const agentId = agentSelect ? agentSelect.value : '';
+    
+    console.log('Discovery - Network:', networkCidr, 'Agent:', agentId);
+    
+    if (!networkCidr) {
+        alert('Seleziona una rete da scansionare');
+        return;
+    }
+    if (!agentId) {
+        alert('Seleziona una sonda MikroTik per la scansione');
+        return;
+    }
+    
+    const loading = document.getElementById('discoveryLoading');
+    const loadingText = document.getElementById('discoveryLoadingText');
+    const section = document.getElementById('discoverySection');
+    
+    loading.style.display = 'block';
+    loadingText.textContent = 'Scansione in corso...';
+    section.style.display = 'none';
+    
+    try {
+        // Scansiona via sonda MikroTik
+        const scanUrl = `/api/v1/mikrotik/agents/${agentId}/ip-scan?network=${encodeURIComponent(networkCidr)}`;
+        const scanResponse = await fetch(scanUrl, { method: 'POST' });
+        const scanData = await scanResponse.json();
+        
+        if (!scanData.success) {
+            throw new Error(scanData.error || 'Scansione fallita');
+        }
+        
+        // Filtra solo device con MAC
+        const devicesWithMac = scanData.results.filter(d => d.mac_address && d.mac_address.trim() !== '');
+        
+        if (devicesWithMac.length === 0) {
+            alert('Nessun dispositivo con MAC address trovato');
+            loading.style.display = 'none';
+            return;
+        }
+        
+        // Enrich con vendor info
+        loadingText.textContent = 'Identificazione vendor...';
+        const enrichResponse = await fetch('/api/v1/inventory/enrich-devices', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ devices: devicesWithMac })
+        });
+        const enrichData = await enrichResponse.json();
+
+        discoveredDevices = enrichData.success ? enrichData.devices : devicesWithMac;
+
+        // Scansiona porte, reverse DNS e suggerisci credenziali per ogni device
+        loadingText.textContent = 'Scansione porte TCP/UDP e reverse DNS...';
+        let scannedCount = 0;
+        const totalDevices = discoveredDevices.length;
+        
+        const scanPromises = discoveredDevices.map(async (dev) => {
+            try {
+                // 1. Scansiona porte TCP/UDP
+                try {
+                    const portsResponse = await fetch(`/api/v1/inventory/scan-ports/${dev.address}`);
+                    const portsData = await portsResponse.json();
+                    if (portsData.success && portsData.open_ports) {
+                        dev.open_ports = portsData.open_ports;
+                        console.log(`Port scan ${dev.address}: ${portsData.active_count} porte aperte`);
+                    }
+                } catch (e) {
+                    console.warn(`Port scan fallito per ${dev.address}:`, e);
+                    dev.open_ports = [];
+                }
+                
+                // 2. Suggerimento tipo credenziali (basato sulle porte appena scansionate)
+                const response = await fetch(`/api/v1/inventory/suggest-credential-type/${dev.address}`);
+                const data = await response.json();
+                if (data.success && data.suggested_type !== 'unknown') {
+                    dev.suggested_credential_type = data.suggested_type;
+                }
+
+                // 3. Reverse DNS se non ha hostname
+                if (!dev.hostname && !dev.identity) {
+                    try {
+                        const dnsResponse = await fetch(`/api/v1/inventory/reverse-dns/${dev.address}`);
+                        const dnsData = await dnsResponse.json();
+                        if (dnsData.success && dnsData.hostname) {
+                            dev.hostname = dnsData.hostname;
+                            console.log(`Reverse DNS ${dev.address}: ${dnsData.hostname}`);
+                        }
+                    } catch (e) {
+                        console.warn(`Reverse DNS fallito per ${dev.address}:`, e);
+                    }
+                }
+                
+                scannedCount++;
+                loadingText.textContent = `Scansione porte e DNS: ${scannedCount}/${totalDevices}...`;
+            } catch (e) {
+                console.warn(`Errore scansione per ${dev.address}:`, e);
+            }
+        });
+        await Promise.all(scanPromises);
+
+        // Carica le credenziali disponibili
+        const credResponse = await fetch(`/api/v1/customers/${customerId}/credentials`);
+        const credData = await credResponse.json();
+        const availableCredentials = credData.credentials || [];
+
+        // Identifica automaticamente i dispositivi usando le credenziali suggerite
+        loadingText.textContent = 'Identificazione automatica dispositivi...';
+        const identificationPromises = discoveredDevices.map(async (dev) => {
+            if (!dev.suggested_credential_type) return;
+
+            // Trova credenziali del tipo suggerito
+            const matchingCredentials = availableCredentials.filter(c =>
+                c.type === dev.suggested_credential_type ||
+                (dev.suggested_credential_type === 'wmi' && c.type === 'windows') ||
+                (dev.suggested_credential_type === 'ssh' && c.type === 'linux') ||
+                (dev.suggested_credential_type === 'mikrotik' && c.type === 'routeros')
+            );
+
+            if (matchingCredentials.length === 0) {
+                console.warn(`Nessuna credenziale ${dev.suggested_credential_type} disponibile per ${dev.address}`);
+                return;
+            }
+
+            // Prova a identificare il dispositivo
+            try {
+                const probeResponse = await fetch(`/api/v1/inventory/probe-device?customer_id=${customerId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        address: dev.address,
+                        mac_address: dev.mac_address,
+                        credential_ids: matchingCredentials.map(c => c.id)
+                    })
+                });
+                const probeData = await probeResponse.json();
+
+                if (probeData.success && probeData.device_type) {
+                    // Aggiorna il dispositivo con i dati identificati
+                    Object.assign(dev, probeData);
+                    console.log(`✅ Identificato ${dev.address} come ${probeData.device_type}`);
+                }
+            } catch (e) {
+                console.warn(`Errore identificazione ${dev.address}:`, e);
+            }
+        });
+        await Promise.all(identificationPromises);
+
+        // Render risultati
+        renderDiscoveryResults();
+        document.getElementById('discoveryDeviceCount').textContent = discoveredDevices.length;
+        section.style.display = 'block';
+        
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    } finally {
+        loading.style.display = 'none';
+    }
+}
+
+function renderDiscoveryResults() {
+    const tbody = document.getElementById('discoveryResultsBody');
+    tbody.innerHTML = '';
+    
+    const typeOptions = `
+        <option value="other">Generico</option>
+        <option value="mikrotik">MikroTik</option>
+        <option value="network">Rete</option>
+        <option value="windows">Windows</option>
+        <option value="linux">Linux</option>
+        <option value="printer">Stampante</option>
+        <option value="camera">Telecamera</option>
+        <option value="voip">VoIP</option>
+    `;
+    
+    const vendorColors = {
+        'MikroTik': 'danger', 'Cisco': 'primary', 'HP': 'info', 'Ubiquiti': 'success',
+        'Hikvision': 'warning', 'Dahua': 'warning', 'Apple': 'secondary',
+        'Dell': 'dark', 'Brother': 'info', 'Canon': 'info', 'default': 'secondary'
+    };
+    
+    let identifiedCount = 0;
+    
+    discoveredDevices.forEach((dev, idx) => {
+        // Vendor badge
+        const vendor = dev.vendor || '';
+        const vendorBadge = vendor 
+            ? `<span class="badge bg-${vendorColors[vendor] || 'secondary'}">${vendor}</span>`
+            : '<span class="text-muted">-</span>';
+        
+        // Mappa tipo credenziali -> tipo device
+        const credentialToDeviceType = {
+            'wmi': 'windows',
+            'ssh': 'linux',
+            'snmp': 'network',
+            'mikrotik': 'mikrotik'
+        };
+
+        // Tipo suggerito: prima usa il tipo identificato, poi mappa dal tipo credenziali, infine 'other'
+        let suggestedType = dev.identified_type || dev.suggested_type || 'other';
+        if (!dev.identified_type && dev.suggested_credential_type && credentialToDeviceType[dev.suggested_credential_type]) {
+            suggestedType = credentialToDeviceType[dev.suggested_credential_type];
+            dev.suggested_type = suggestedType; // Salva per uso futuro
+        }
+
+        // Credenziali suggerite
+        let credBadge = '<span class="text-muted small">-</span>';
+        if (dev.suggested_credential_type) {
+            const credTypes = {
+                'wmi': { label: 'WMI', color: 'primary', icon: 'windows' },
+                'ssh': { label: 'SSH', color: 'success', icon: 'terminal' },
+                'snmp': { label: 'SNMP', color: 'info', icon: 'router' },
+                'mikrotik': { label: 'MikroTik', color: 'danger', icon: 'gear' }
+            };
+            const credType = credTypes[dev.suggested_credential_type] || { label: dev.suggested_credential_type, color: 'secondary', icon: 'key' };
+            credBadge = `<span class="badge bg-${credType.color}" title="Tipo suggerito in base alle porte aperte">
+                <i class="bi bi-${credType.icon}"></i> ${credType.label}
+            </span>`;
+        }
+
+        // Stato identificazione
+        let statusBadge = '<span class="text-muted">-</span>';
+        if (dev.identified_by) {
+            identifiedCount++;
+            const method = dev.identified_by.replace('probe_', '').replace('mac_vendor', 'MAC');
+            statusBadge = `<span class="badge bg-success">${method}</span>`;
+            if (dev.os_family) {
+                statusBadge += ` <small>${dev.os_family}</small>`;
+            }
+        } else if (dev.vendor) {
+            statusBadge = '<span class="badge bg-info">MAC</span>';
+        }
+
+        // Servizi aperti (porte)
+        let servicesDisplay = '<span class="text-muted small">-</span>';
+        if (dev.open_ports && Array.isArray(dev.open_ports) && dev.open_ports.length > 0) {
+            const openServices = dev.open_ports.filter(p => p.open);
+            if (openServices.length > 0) {
+                const serviceList = openServices.slice(0, 5).map(s =>
+                    `<span class="badge bg-info" title="Port ${s.port}/${s.protocol || 'tcp'}">${s.service || s.port}</span>`
+                ).join(' ');
+                const moreCount = openServices.length > 5 ? ` <small>(+${openServices.length - 5})</small>` : '';
+                servicesDisplay = serviceList + moreCount;
+            }
+        }
+        
+        tbody.innerHTML += `
+            <tr data-index="${idx}">
+                <td><input type="checkbox" class="disc-cb" data-index="${idx}" checked></td>
+                <td><code>${dev.address || '-'}</code></td>
+                <td><code class="small">${dev.mac_address || '-'}</code></td>
+                <td>${vendorBadge}</td>
+                <td>
+                    <select class="form-select form-select-sm disc-type" data-index="${idx}" style="width: 90px;">
+                        ${typeOptions}
+                    </select>
+                </td>
+                <td>${credBadge}</td>
+                <td>${dev.hostname || dev.identity || '-'}</td>
+                <td style="min-width: 200px;">${servicesDisplay}</td>
+                <td>${statusBadge}</td>
+            </tr>
+        `;
+    });
+    
+    // Imposta tipo per ogni device
+    discoveredDevices.forEach((dev, idx) => {
+        const select = document.querySelector(`.disc-type[data-index="${idx}"]`);
+        if (select) {
+            select.value = dev.identified_type || dev.suggested_type || 'other';
+        }
+    });
+    
+    // Badge identificati
+    const badge = document.getElementById('discoveryIdentifiedBadge');
+    if (identifiedCount > 0) {
+        badge.textContent = `${identifiedCount} identificati`;
+        badge.style.display = 'inline';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+function toggleAllDiscovered() {
+    const checked = document.getElementById('selectAllDiscoveredCb').checked;
+    document.querySelectorAll('.disc-cb').forEach(cb => cb.checked = checked);
+}
+
+function selectAllDiscovered() {
+    document.getElementById('selectAllDiscoveredCb').checked = true;
+    toggleAllDiscovered();
+}
+
+async function identifyDiscoveredDevices() {
+    const checkboxes = document.querySelectorAll('.disc-cb:checked');
+    if (checkboxes.length === 0) {
+        alert('Seleziona almeno un dispositivo');
+        return;
+    }
+    
+    // Get credenziali selezionate
+    const credSelect = document.getElementById('discoveryCredentials');
+    const credentialIds = Array.from(credSelect.selectedOptions).map(o => o.value);
+    
+    if (credentialIds.length === 0) {
+        alert('Seleziona almeno una credenziale per l\'identificazione');
+        return;
+    }
+    
+    const devices = [];
+    checkboxes.forEach(cb => {
+        const idx = parseInt(cb.dataset.index);
+        const dev = discoveredDevices[idx];
+        if (dev) {
+            devices.push({ address: dev.address, mac_address: dev.mac_address });
+        }
+    });
+    
+    const loading = document.getElementById('discoveryLoading');
+    const loadingText = document.getElementById('discoveryLoadingText');
+    loading.style.display = 'block';
+    loadingText.textContent = `Identificazione ${devices.length} dispositivi...`;
+    
+    try {
+        const response = await fetch(`/api/v1/inventory/probe-devices?customer_id=${customerId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ devices, credential_ids: credentialIds })
+        });
+        const result = await response.json();
+        
+        if (result.success) {
+            // Aggiorna discoveredDevices
+            result.results.forEach(probeResult => {
+                const idx = discoveredDevices.findIndex(d => d.address === probeResult.address);
+                if (idx >= 0) {
+                    discoveredDevices[idx] = {
+                        ...discoveredDevices[idx],
+                        ...probeResult,
+                        identified_type: probeResult.device_type,
+                    };
+                }
+            });
+            
+            renderDiscoveryResults();
+            alert(`✅ Identificati ${result.probed} dispositivi, ${result.errors} errori`);
+        } else {
+            alert('Errore: ' + (result.error || 'Identificazione fallita'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    } finally {
+        loading.style.display = 'none';
+    }
+}
+
+async function importDiscoveredDevices() {
+    const checkboxes = document.querySelectorAll('.disc-cb:checked');
+    if (checkboxes.length === 0) {
+        alert('Seleziona almeno un dispositivo da importare');
+        return;
+    }
+    
+    const devices = [];
+    checkboxes.forEach(cb => {
+        const idx = parseInt(cb.dataset.index);
+        const dev = discoveredDevices[idx];
+        const typeSelect = document.querySelector(`.disc-type[data-index="${idx}"]`);
+        const deviceType = typeSelect ? typeSelect.value : (dev.identified_type || dev.suggested_type || 'other');
+        
+        if (dev) {
+            // Passa TUTTI i dati raccolti durante la discovery all'import
+            devices.push({
+                address: dev.address,
+                mac_address: dev.mac_address,
+                name: dev.hostname || dev.identity || dev.address,
+                hostname: dev.hostname || dev.identity,  // Hostname risolto via DNS
+                identity: dev.hostname || dev.identity,
+                platform: dev.vendor || dev.platform,
+                board: dev.model || dev.board,
+                device_type: deviceType,
+                category: dev.category,
+                open_ports: dev.open_ports || [],  // Porte TCP/UDP aperte
+                os_family: dev.os_family,
+                os_version: dev.os_version,
+                identified_by: dev.identified_by,
+                credential_used: dev.credential_used,
+            });
+            
+            // Log per debug
+            console.log(`Device ${dev.address}: hostname=${dev.hostname}, open_ports=${dev.open_ports?.filter(p => p.open)?.length || 0}`);
+        }
+    });
+    
+    if (!confirm(`Importare ${devices.length} dispositivi nell'inventario?`)) return;
+    
+    // Log dettagliato per debug
+    console.log('Devices da importare:', JSON.stringify(devices, null, 2));
+    
+    try {
+        const response = await fetch(`/api/v1/inventory/devices/bulk-import?customer_id=${customerId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ devices })
+        });
+        const result = await response.json();
+        console.log('Risultato import:', result);
+        
+        if (result.success) {
+            alert(`✅ Importati ${result.imported} dispositivi\n${result.skipped} duplicati\n${result.skipped_no_mac || 0} senza MAC`);
+            
+            // Rimuovi importati dalla lista
+            const importedIps = devices.map(d => d.address);
+            discoveredDevices = discoveredDevices.filter(d => !importedIps.includes(d.address));
+            
+            if (discoveredDevices.length > 0) {
+                renderDiscoveryResults();
+                document.getElementById('discoveryDeviceCount').textContent = discoveredDevices.length;
+            } else {
+                document.getElementById('discoverySection').style.display = 'none';
+            }
+            
+            // Ricarica inventario
+            loadInventory();
+        } else {
+            alert('Errore: ' + (result.error || 'Import fallito'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+// ==========================================
+// INVENTARIO
+// ==========================================
+
+// Memorizza le credenziali per il dropdown
+let customerCredentials = [];
+
+async function loadInventory() {
+    const typeFilter = document.getElementById('inventoryTypeFilter')?.value || '';
+    const loading = document.getElementById('inventoryLoading');
+    const tbody = document.getElementById('inventoryBody');
+    
+    loading.style.display = 'block';
+    
+    try {
+        // Carica credenziali se non già caricate
+        if (customerCredentials.length === 0) {
+            const credResponse = await fetch(`/api/v1/customers/${customerId}/credentials`);
+            const credData = await credResponse.json();
+            customerCredentials = credData.credentials || [];
+        }
+        
+        let url = `/api/v1/inventory/devices?customer_id=${customerId}`;
+        if (typeFilter) url += `&device_type=${typeFilter}`;
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        document.getElementById('inventoryCount').textContent = data.total;
+        tbody.innerHTML = '';
+
+        if (data.devices.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="12" class="text-center py-4 text-muted">Nessun dispositivo in inventario. Esegui una scansione sopra.</td></tr>';
+        } else {
+            // Ordina per IP (numericamente)
+            const sortedDevices = data.devices.sort((a, b) => {
+                const ipA = (a.primary_ip || '').split('.').map(num => parseInt(num || 0, 10));
+                const ipB = (b.primary_ip || '').split('.').map(num => parseInt(num || 0, 10));
+                for (let i = 0; i < 4; i++) {
+                    if (ipA[i] !== ipB[i]) return ipA[i] - ipB[i];
+                }
+                return 0;
+            });
+
+            sortedDevices.forEach(dev => {
+                const typeIcons = {
+                    'mikrotik': '<i class="bi bi-router text-danger"></i>',
+                    'windows': '<i class="bi bi-windows text-primary"></i>',
+                    'linux': '<i class="bi bi-terminal text-warning"></i>',
+                    'network': '<i class="bi bi-diagram-3 text-info"></i>',
+                    'printer': '<i class="bi bi-printer text-secondary"></i>',
+                    'camera': '<i class="bi bi-camera-video text-success"></i>',
+                    'voip': '<i class="bi bi-telephone text-info"></i>',
+                    'other': '<i class="bi bi-device-hdd text-muted"></i>'
+                };
+                const typeIcon = typeIcons[dev.device_type] || typeIcons['other'];
+                
+                const statusBadge = dev.status === 'online' 
+                    ? '<span class="badge bg-success">Online</span>'
+                    : (dev.status === 'offline' 
+                        ? '<span class="badge bg-danger">Offline</span>'
+                        : '<span class="badge bg-secondary">-</span>');
+                
+                // Dropdown credenziali
+                let credOptions = '<option value="">-- Nessuna --</option>';
+                customerCredentials.forEach(cred => {
+                    const selected = cred.id === dev.credential_id ? 'selected' : '';
+                    const typeLabel = cred.credential_type ? ` (${cred.credential_type})` : '';
+                    credOptions += `<option value="${cred.id}" ${selected}>${cred.name}${typeLabel}</option>`;
+                });
+                
+                const credSelect = `
+                    <select class="form-select form-select-sm" style="width: 130px; font-size: 0.8rem;" 
+                            onchange="updateDeviceCredential('${dev.id}', this.value)">
+                        ${credOptions}
+                    </select>
+                `;
+                
+                // Identificato da
+                let identifiedBadge = '<span class="text-muted small">-</span>';
+                if (dev.identified_by) {
+                    const method = dev.identified_by.replace('probe_', '').toUpperCase();
+                    identifiedBadge = `<span class="badge bg-success">${method}</span>`;
+                }
+
+                // Servizi aperti
+                let servicesDisplay = '<span class="text-muted small">-</span>';
+                if (dev.open_ports && Array.isArray(dev.open_ports) && dev.open_ports.length > 0) {
+                    const openServices = dev.open_ports.filter(p => p.open);
+                    if (openServices.length > 0) {
+                        const serviceList = openServices.slice(0, 5).map(s =>
+                            `<span class="badge bg-info" title="Port ${s.port}">${s.service}</span>`
+                        ).join(' ');
+                        const moreCount = openServices.length > 5 ? ` <small>(+${openServices.length - 5})</small>` : '';
+                        servicesDisplay = serviceList + moreCount;
+                    }
+                }
+
+                tbody.innerHTML += `
+                    <tr>
+                        <td>
+                            <strong>${dev.name}</strong>
+                        </td>
+                        <td>
+                            ${dev.hostname || '-'}
+                            ${dev.domain ? '<br><small class="text-muted">.' + dev.domain + '</small>' : ''}
+                        </td>
+                        <td><code class="small">${dev.primary_ip || '-'}</code></td>
+                        <td><code class="small">${dev.mac_address || '-'}</code></td>
+                        <td>${typeIcon} <span class="small">${dev.device_type}</span></td>
+                        <td><span class="small">${dev.category || '-'}</span></td>
+                        <td><span class="small">${dev.os_family || '-'}</span></td>
+                        <td><span class="small">${dev.os_version || '-'}</span></td>
+                        <td><span class="small">${dev.manufacturer || '-'}</span></td>
+                        <td style="min-width: 200px;">${servicesDisplay}</td>
+                        <td>${credSelect}</td>
+                        <td>${identifiedBadge}</td>
+                        <td>${statusBadge}</td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <button class="btn btn-outline-info" onclick="viewInventoryDevice('${dev.id}')" title="Dettagli">
+                                    <i class="bi bi-eye"></i>
+                                </button>
+                                <button class="btn btn-warning" onclick="autoDetectDevice('${dev.id}', '${dev.primary_ip}')" title="Auto-Detect (usa credenziali default + porte)">
+                                    <i class="bi bi-bullseye"></i>
+                                </button>
+                                <button class="btn btn-outline-warning" onclick="probeDevice('${dev.id}', '${dev.primary_ip}')" title="Identifica (selezione manuale)">
+                                    <i class="bi bi-cpu"></i>
+                                </button>
+                                <button class="btn btn-outline-secondary" onclick="scanPorts('${dev.id}', '${dev.primary_ip}')" title="Scansiona Porte">
+                                    <i class="bi bi-router"></i>
+                                </button>
+                                <button class="btn btn-outline-danger" onclick="deleteInventoryDevice('${dev.id}')" title="Elimina">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                
+                // Debug: log dei dati del device
+                if (dev.open_ports && dev.open_ports.length > 0) {
+                    console.log(`Device ${dev.name} (${dev.primary_ip}): ${dev.open_ports.filter(p => p.open).length} porte aperte`);
+                }
+                if (dev.hostname) {
+                    console.log(`Device ${dev.name}: hostname = ${dev.hostname}`);
+                }
+            });
+        }
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="13" class="text-center py-4 text-danger">Errore: ${e.message}</td></tr>`;
+    } finally {
+        loading.style.display = 'none';
+    }
+}
+
+async function clearInventory() {
+    if (!confirm('⚠️ ATTENZIONE: Questa operazione eliminerà TUTTI i dispositivi dall\'inventario di questo cliente.\n\nSei sicuro di voler continuare?')) {
+        return;
+    }
+
+    if (!confirm('Conferma nuovamente: eliminare TUTTI i dispositivi?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/v1/inventory/devices/clear?customer_id=${customerId}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            alert(`✅ Inventario svuotato: ${result.deleted} dispositivi eliminati`);
+            await loadInventory();
+        } else {
+            alert('Errore: ' + (result.error || 'Eliminazione fallita'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+async function updateDeviceCredential(deviceId, credentialId) {
+    try {
+        const response = await fetch(`/api/v1/inventory/devices/${deviceId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ credential_id: credentialId || null })
+        });
+        
+        const result = await response.json();
+        if (!result.success) {
+            alert('Errore aggiornamento credenziale');
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+async function probeDevice(deviceId, ip) {
+    if (!ip) {
+        alert('Dispositivo senza IP, impossibile identificare');
+        return;
+    }
+    
+    // Trova la credenziale associata al device
+    const row = event.target.closest('tr');
+    const credSelect = row.querySelector('select');
+    const credentialId = credSelect ? credSelect.value : null;
+    
+    // Se non c'è credenziale selezionata, usa tutte le credenziali attive
+    let credIds = credentialId ? [credentialId] : customerCredentials.map(c => c.id);
+    
+    if (credIds.length === 0) {
+        alert('Nessuna credenziale disponibile. Aggiungi credenziali prima di identificare.');
+        return;
+    }
+    
+    // Mostra loading
+    const btn = event.target.closest('button');
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    btn.disabled = true;
+    
+    try {
+        // Usa il nuovo endpoint che identifica e aggiorna automaticamente
+        const params = new URLSearchParams();
+        credIds.forEach(id => params.append('credential_ids', id));
+        
+        const response = await fetch(`/api/v1/inventory/devices/${deviceId}/identify?${params}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            const probe = result.probe_result;
+
+            // Crea messaggio dettagliato
+            let message = `✅ Identificazione Completata\n\n`;
+            message += `🔍 Identificato da: ${probe.identified_by || 'unknown'}\n`;
+            message += `💾 Credenziale usata: ${probe.credential_used || 'N/A'}\n\n`;
+            message += `📋 Dettagli Rilevati:\n`;
+            message += `• Tipo: ${probe.device_type || 'unknown'}\n`;
+            message += `• Categoria: ${probe.category || 'N/A'}\n`;
+            message += `• OS: ${probe.os_family || 'unknown'} ${probe.os_version || ''}\n`;
+            message += `• Hostname: ${probe.hostname || 'N/A'}\n`;
+            message += `• Modello: ${probe.model || 'N/A'}\n`;
+            message += `• Vendor: ${probe.vendor || 'N/A'}\n`;
+
+            if (result.updates_applied && result.updates_applied.length > 0) {
+                message += `\n✨ Campi aggiornati: ${result.updates_applied.join(', ')}`;
+            } else {
+                message += `\n⚠️ Nessun campo aggiornato (dati già presenti)`;
+            }
+
+            // Mostra protocolli testati
+            if (probe.probe_results && probe.probe_results.length > 0) {
+                message += `\n\n🔌 Protocolli Testati:`;
+                probe.probe_results.forEach(p => {
+                    const icon = p.success ? '✅' : '❌';
+                    message += `\n  ${icon} ${p.protocol}: ${p.error || 'OK'}`;
+                });
+            }
+
+            alert(message);
+            loadInventory();
+        } else {
+            // Errore dettagliato
+            let errorMsg = '❌ Identificazione Fallita\n\n';
+            if (result.probe_result) {
+                const probe = result.probe_result;
+                if (probe.probe_results && probe.probe_results.length > 0) {
+                    errorMsg += 'Protocolli testati:\n';
+                    probe.probe_results.forEach(p => {
+                        errorMsg += `\n• ${p.protocol}: ${p.error || 'fallito'}`;
+                    });
+                }
+            } else {
+                errorMsg += result.detail || result.message || 'Errore sconosciuto';
+            }
+            alert(errorMsg);
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    } finally {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+    }
+}
+
+async function scanPorts(deviceId, ip) {
+    if (!ip) {
+        alert('Dispositivo senza IP, impossibile scansionare le porte');
+        return;
+    }
+    
+    // Mostra loading
+    const btn = event.target.closest('button');
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch(`/api/v1/inventory/devices/${deviceId}/scan-ports`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            const openPorts = result.open_ports.filter(p => p.open);
+            let message = `✅ Scansione Porte Completata\n\n`;
+            message += `📍 IP: ${ip}\n`;
+            message += `🔌 Porte Aperte: ${result.open_count}\n\n`;
+            
+            if (openPorts.length > 0) {
+                message += `Porte rilevate:\n`;
+                openPorts.forEach(p => {
+                    message += `• ${p.port}/${p.protocol} - ${p.service || 'unknown'}\n`;
+                });
+            } else {
+                message += `Nessuna porta aperta rilevata`;
+            }
+            
+            alert(message);
+            loadInventory(); // Ricarica per mostrare le porte aggiornate
+        } else {
+            alert('❌ Errore durante la scansione: ' + (result.detail || result.message || 'Errore sconosciuto'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    } finally {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+    }
+}
+
+async function batchScanPorts() {
+    if (!confirm('Vuoi scansionare le porte di TUTTI i dispositivi inventariati di questo cliente?\n\nQuesta operazione potrebbe richiedere alcuni minuti.')) {
+        return;
+    }
+    
+    const btn = event.target;
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Scansione in corso...';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch(`/api/v1/inventory/devices/batch-scan-ports?customer_id=${customerId}`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            let message = `✅ Scansione Batch Completata\n\n`;
+            message += `📊 Totale dispositivi: ${result.total}\n`;
+            message += `✅ Scansionati con successo: ${result.scanned}\n`;
+            
+            if (result.errors && result.errors.length > 0) {
+                message += `\n❌ Errori: ${result.errors.length}\n`;
+                if (result.errors.length <= 5) {
+                    result.errors.forEach(e => message += `• ${e}\n`);
+                } else {
+                    result.errors.slice(0, 5).forEach(e => message += `• ${e}\n`);
+                    message += `... e altri ${result.errors.length - 5} errori\n`;
+                }
+            }
+            
+            alert(message);
+            loadInventory(); // Ricarica per mostrare le porte aggiornate
+        } else {
+            alert('❌ Errore durante la scansione batch: ' + (result.detail || result.message || 'Errore sconosciuto'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    } finally {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+    }
+}
+
+// Auto-Detect singolo dispositivo usando credenziali di default
+async function autoDetectDevice(deviceId, address) {
+    const btn = event.target.closest('button');
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+    btn.disabled = true;
+    
+    try {
+        const response = await fetch(`/api/v1/inventory/auto-detect?customer_id=${customerId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                address: address,
+                use_default_credentials: true,
+                use_agent: true  // Usa agent se disponibile
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success && result.scan_result) {
+            const sr = result.scan_result;
+            let message = '✅ Auto-Detect Completato!\n\n';
+            message += `Indirizzo: ${address}\n`;
+            message += `Tipo: ${sr.device_type || 'unknown'}\n`;
+            message += `Categoria: ${sr.category || 'N/A'}\n`;
+            message += `Hostname: ${sr.hostname || sr.sysName || 'N/A'}\n`;
+            message += `OS: ${sr.os_name || sr.os_family || 'N/A'}\n`;
+            message += `Versione: ${sr.os_version || sr.version || 'N/A'}\n`;
+            message += `Vendor: ${sr.vendor || sr.manufacturer || 'N/A'}\n`;
+            message += `Modello: ${sr.model || 'N/A'}\n`;
+            message += `Serial: ${sr.serial_number || 'N/A'}\n`;
+            
+            if (sr.cpu_model) message += `CPU: ${sr.cpu_model} (${sr.cpu_cores || '?'} cores)\n`;
+            if (sr.memory_total_mb || sr.ram_total_mb) message += `RAM: ${sr.memory_total_mb || sr.ram_total_mb} MB\n`;
+            if (sr.disk_total_gb) message += `Disco: ${sr.disk_total_gb} GB\n`;
+            
+            message += `\nIdentificato via: ${sr.identified_by || 'N/A'}\n`;
+            
+            if (result.credentials_tested && result.credentials_tested.length > 0) {
+                message += `\nCredenziali testate:\n`;
+                result.credentials_tested.forEach(c => {
+                    message += `  • ${c.name} (${c.type})\n`;
+                });
+            }
+            
+            if (result.open_ports && result.open_ports.length > 0) {
+                const openPorts = result.open_ports.filter(p => p.open).map(p => p.port);
+                message += `\nPorte aperte: ${openPorts.join(', ')}\n`;
+            }
+            
+            if (result.agent_used) {
+                message += `\nAgent usato: ${result.agent_used.name} (${result.agent_used.type})\n`;
+            }
+            
+            alert(message);
+            
+            // Aggiorna dispositivo in inventario
+            await fetch(`/api/v1/inventory/devices/${deviceId}/identify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ probe_result: sr })
+            });
+            
+            loadInventory();
+        } else {
+            let errorMsg = '❌ Auto-Detect Fallito\n\n';
+            errorMsg += `Indirizzo: ${address}\n`;
+            errorMsg += `Errore: ${result.error || 'Nessuna informazione ottenuta'}\n`;
+            
+            if (result.open_ports && result.open_ports.length > 0) {
+                const openPorts = result.open_ports.filter(p => p.open).map(p => p.port);
+                errorMsg += `\nPorte aperte rilevate: ${openPorts.join(', ')}\n`;
+            }
+            
+            if (result.credentials_tested && result.credentials_tested.length > 0) {
+                errorMsg += `\nCredenziali testate senza successo:\n`;
+                result.credentials_tested.forEach(c => {
+                    errorMsg += `  • ${c.name} (${c.type})\n`;
+                });
+            } else {
+                errorMsg += `\n⚠️ Nessuna credenziale di default trovata.\nConfigura credenziali WMI/SSH/SNMP per questo cliente.`;
+            }
+            
+            alert(errorMsg);
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    } finally {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+    }
+}
+
+// Auto-Detect batch su tutti i dispositivi dell'inventario
+async function batchAutoDetect() {
+    if (!confirm('Eseguire Auto-Detect su TUTTI i dispositivi dell\'inventario?\n\nQuesta operazione:\n• Scansiona le porte di ogni dispositivo\n• Determina il tipo di credenziali da usare (WMI/SSH/SNMP)\n• Prova le credenziali di default del cliente\n• Aggiorna le informazioni raccolte\n\nPotrebbe richiedere diversi minuti.')) return;
+    
+    const btn = event.target.closest('button');
+    const originalHtml = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> Elaborazione...';
+    btn.disabled = true;
+    
+    try {
+        // Ottieni lista dispositivi
+        const listResponse = await fetch(`/api/v1/inventory/devices?customer_id=${customerId}`);
+        const listData = await listResponse.json();
+        
+        if (!listData.devices || listData.devices.length === 0) {
+            alert('Nessun dispositivo in inventario');
+            return;
+        }
+        
+        const devices = listData.devices;
+        let successCount = 0;
+        let failCount = 0;
+        let results = [];
+        
+        // Processa ogni dispositivo
+        for (let i = 0; i < devices.length; i++) {
+            const dev = devices[i];
+            btn.innerHTML = `<i class="bi bi-hourglass-split"></i> ${i+1}/${devices.length}...`;
+            
+            if (!dev.primary_ip) {
+                results.push({ address: dev.name, success: false, error: 'No IP' });
+                failCount++;
+                continue;
+            }
+            
+            try {
+                const response = await fetch(`/api/v1/inventory/auto-detect?customer_id=${customerId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        address: dev.primary_ip,
+                        mac_address: dev.mac_address,
+                        use_default_credentials: true,
+                        use_agent: true
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success && result.identified) {
+                    // Aggiorna dispositivo
+                    await fetch(`/api/v1/inventory/devices/${dev.id}/identify`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ probe_result: result.scan_result })
+                    });
+                    
+                    results.push({ 
+                        address: dev.primary_ip, 
+                        success: true, 
+                        type: result.scan_result.device_type,
+                        hostname: result.scan_result.hostname || result.scan_result.sysName,
+                        method: result.scan_result.identified_by
+                    });
+                    successCount++;
+                } else {
+                    results.push({ 
+                        address: dev.primary_ip, 
+                        success: false, 
+                        error: result.error || 'Non identificato' 
+                    });
+                    failCount++;
+                }
+            } catch (e) {
+                results.push({ address: dev.primary_ip, success: false, error: e.message });
+                failCount++;
+            }
+        }
+        
+        // Mostra risultato
+        let message = `✅ Auto-Detect Batch Completato!\n\n`;
+        message += `Totale: ${devices.length}\n`;
+        message += `Identificati: ${successCount}\n`;
+        message += `Falliti: ${failCount}\n\n`;
+        
+        if (successCount > 0) {
+            message += `Dispositivi identificati:\n`;
+            results.filter(r => r.success).slice(0, 10).forEach(r => {
+                message += `  ✓ ${r.address}: ${r.hostname || r.type} (${r.method})\n`;
+            });
+            if (successCount > 10) message += `  ... e altri ${successCount - 10}\n`;
+        }
+        
+        if (failCount > 0 && failCount <= 5) {
+            message += `\nDispositivi non identificati:\n`;
+            results.filter(r => !r.success).forEach(r => {
+                message += `  ✗ ${r.address}: ${r.error}\n`;
+            });
+        }
+        
+        alert(message);
+        loadInventory();
+        
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    } finally {
+        btn.innerHTML = originalHtml;
+        btn.disabled = false;
+    }
+}
+
+async function deleteInventoryDevice(deviceId) {
+    if (!confirm('Eliminare questo dispositivo dall\'inventario?')) return;
+    
+    try {
+        const response = await fetch(`/api/v1/inventory/devices/${deviceId}`, { method: 'DELETE' });
+        const result = await response.json();
+        
+        if (result.success) {
+            loadInventory();
+        } else {
+            alert('Errore: ' + (result.error || 'Eliminazione fallita'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+async function addToDude(deviceId) {
+    if (!confirm('Aggiungere questo dispositivo a The Dude per il monitoraggio?')) return;
+    
+    try {
+        const response = await fetch(`/api/v1/inventory/devices/${deviceId}/add-to-dude`, { method: 'POST' });
+        const result = await response.json();
+        
+        if (result.success) {
+            alert('✅ Dispositivo aggiunto a The Dude');
+            loadInventory();
+        } else {
+            alert('Errore: ' + (result.message || 'Aggiunta fallita'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+async function viewInventoryDevice(deviceId) {
+    try {
+        // Carica dettagli dispositivo
+        const response = await fetch(`/api/v1/inventory/devices/${deviceId}`);
+        const device = await response.json();
+
+        if (!device) {
+            alert('Dispositivo non trovato');
+            return;
+        }
+
+        // Crea contenuto modal
+        let detailsHtml = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-3">Informazioni Generali</h6>
+                    <table class="table table-sm">
+                        <tr><th width="40%">Nome:</th><td>${device.name || '-'}</td></tr>
+                        <tr><th>Hostname:</th><td>${device.hostname || '-'}</td></tr>
+                        <tr><th>Dominio:</th><td>${device.domain || '-'}</td></tr>
+                        <tr><th>IP Primario:</th><td>${device.primary_ip || '-'}</td></tr>
+                        <tr><th>MAC Primario:</th><td>${device.primary_mac || '-'}</td></tr>
+                        <tr><th>Tipo:</th><td><span class="badge bg-info">${device.device_type || 'other'}</span></td></tr>
+                        <tr><th>Categoria:</th><td>${device.category || '-'}</td></tr>
+                        <tr><th>Stato:</th><td><span class="badge bg-${device.status === 'online' ? 'success' : device.status === 'offline' ? 'danger' : 'secondary'}">${device.status || 'unknown'}</span></td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-3">Hardware & Sistema</h6>
+                    <table class="table table-sm">
+                        <tr><th width="40%">Produttore:</th><td>${device.manufacturer || '-'}</td></tr>
+                        <tr><th>Modello:</th><td>${device.model || '-'}</td></tr>
+                        <tr><th>Seriale:</th><td>${device.serial_number || '-'}</td></tr>
+                        <tr><th>OS:</th><td>${device.os_family || '-'} ${device.os_version || ''}</td></tr>
+                        <tr><th>CPU:</th><td>${device.cpu_model || '-'} ${device.cpu_cores ? '(' + device.cpu_cores + ' cores)' : ''}</td></tr>
+                        <tr><th>RAM:</th><td>${device.ram_total_gb ? device.ram_total_gb + ' GB' : '-'}</td></tr>
+                        <tr><th>Ultima vista:</th><td>${device.last_seen ? new Date(device.last_seen).toLocaleString('it-IT') : '-'}</td></tr>
+                    </table>
+                </div>
+            </div>
+        `;
+
+        // Interfacce di rete
+        if (device.network_interfaces && device.network_interfaces.length > 0) {
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Interfacce di Rete (${device.network_interfaces.length})</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>MAC</th>
+                                <th>IP</th>
+                                <th>Velocità</th>
+                                <th>Stato</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            device.network_interfaces.forEach(nic => {
+                const ips = nic.ip_addresses ? JSON.parse(nic.ip_addresses).map(ip => ip.ip || ip).join(', ') : '-';
+                detailsHtml += `
+                    <tr>
+                        <td><code>${nic.name}</code></td>
+                        <td><small>${nic.mac_address || '-'}</small></td>
+                        <td><small>${ips}</small></td>
+                        <td>${nic.speed_mbps ? nic.speed_mbps + ' Mbps' : '-'}</td>
+                        <td><span class="badge bg-${nic.admin_status === 'up' ? 'success' : 'secondary'}">${nic.admin_status || '-'}</span></td>
+                    </tr>
+                `;
+            });
+            detailsHtml += '</tbody></table></div>';
+        }
+
+        // Dischi
+        if (device.disks && device.disks.length > 0) {
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Dischi (${device.disks.length})</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>Mount Point</th>
+                                <th>Filesystem</th>
+                                <th>Dimensione</th>
+                                <th>Utilizzato</th>
+                                <th>Uso %</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+            device.disks.forEach(disk => {
+                const usedPercent = disk.percent_used || (disk.size_gb && disk.used_gb ? Math.round((disk.used_gb / disk.size_gb) * 100) : 0);
+                const progressColor = usedPercent > 90 ? 'danger' : usedPercent > 75 ? 'warning' : 'success';
+                detailsHtml += `
+                    <tr>
+                        <td><code>${disk.name}</code></td>
+                        <td>${disk.mount_point || '-'}</td>
+                        <td>${disk.filesystem || '-'}</td>
+                        <td>${disk.size_gb ? disk.size_gb.toFixed(1) + ' GB' : '-'}</td>
+                        <td>${disk.used_gb ? disk.used_gb.toFixed(1) + ' GB' : '-'}</td>
+                        <td>
+                            <div class="progress" style="height: 20px;">
+                                <div class="progress-bar bg-${progressColor}" style="width: ${usedPercent}%">${usedPercent}%</div>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+            detailsHtml += '</tbody></table></div>';
+        }
+
+        // Dettagli specifici per tipo
+        if (device.windows_details) {
+            const wd = device.windows_details;
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Dettagli Windows</h6>
+                <table class="table table-sm">
+                    <tr><th width="30%">Edizione:</th><td>${wd.edition || '-'}</td></tr>
+                    <tr><th>Ruolo Dominio:</th><td>${wd.domain_role || '-'}</td></tr>
+                    <tr><th>Dominio:</th><td>${wd.domain_name || '-'}</td></tr>
+                    <tr><th>Antivirus:</th><td>${wd.antivirus_name || '-'} <span class="badge bg-${wd.antivirus_status === 'active' ? 'success' : 'warning'}">${wd.antivirus_status || '-'}</span></td></tr>
+                    <tr><th>Ultimo Update:</th><td>${wd.last_update_check ? new Date(wd.last_update_check).toLocaleString('it-IT') : '-'}</td></tr>
+                </table>
+            `;
+        }
+
+        if (device.linux_details) {
+            const ld = device.linux_details;
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Dettagli Linux</h6>
+                <table class="table table-sm">
+                    <tr><th width="30%">Distribuzione:</th><td>${ld.distro_name || '-'} ${ld.distro_version || ''}</td></tr>
+                    <tr><th>Kernel:</th><td>${ld.kernel_version || '-'}</td></tr>
+                    <tr><th>Package Manager:</th><td>${ld.package_manager || '-'}</td></tr>
+                    <tr><th>Docker:</th><td>${ld.docker_installed ? '✅ Installato (v' + (ld.docker_version || '-') + ')' : '❌ Non installato'}</td></tr>
+                    <tr><th>Container Attivi:</th><td>${ld.containers_running || 0}</td></tr>
+                    <tr><th>Uptime:</th><td>${ld.uptime_days ? ld.uptime_days.toFixed(1) + ' giorni' : '-'}</td></tr>
+                </table>
+            `;
+        }
+
+        if (device.mikrotik_details) {
+            const md = device.mikrotik_details;
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Dettagli MikroTik RouterOS</h6>
+                <table class="table table-sm">
+                    <tr><th width="30%">RouterOS:</th><td>${md.routeros_version || '-'} (${md.routeros_channel || '-'})</td></tr>
+                    <tr><th>Board:</th><td>${md.board_name || '-'}</td></tr>
+                    <tr><th>Licenza:</th><td>${md.license_level || '-'}</td></tr>
+                    <tr><th>Identity:</th><td>${md.identity || '-'}</td></tr>
+                    <tr><th>CPU Load:</th><td>${md.cpu_load ? md.cpu_load + '%' : '-'}</td></tr>
+                    <tr><th>Memoria Libera:</th><td>${md.memory_free_mb ? md.memory_free_mb + ' MB' : '-'}</td></tr>
+                    <tr><th>Uptime:</th><td>${md.uptime || '-'}</td></tr>
+                    <tr><th>Dude Agent:</th><td>${md.dude_agent_enabled ? '✅ Abilitato (' + (md.dude_agent_status || 'unknown') + ')' : '❌ Disabilitato'}</td></tr>
+                </table>
+            `;
+        }
+
+        // Note e descrizione
+        if (device.description || device.notes) {
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Note</h6>
+                ${device.description ? '<p><strong>Descrizione:</strong> ' + device.description + '</p>' : ''}
+                ${device.notes ? '<p><strong>Note:</strong> ' + device.notes + '</p>' : ''}
+            `;
+        }
+
+        // Mostra modal
+        showModal('Dettagli Dispositivo: ' + device.name, detailsHtml, 'lg');
+
+    } catch (e) {
+        alert('Errore caricamento dettagli: ' + e.message);
+    }
+}
+
+function showModal(title, content, size = 'md') {
+    // Crea o riusa modal esistente
+    let modal = document.getElementById('dynamicModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'dynamicModal';
+        modal.className = 'modal fade';
+        modal.innerHTML = `
+            <div class="modal-dialog modal-${size} modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"></h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body"></div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Chiudi</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+
+    // Aggiorna contenuto
+    modal.querySelector('.modal-title').textContent = title;
+    modal.querySelector('.modal-body').innerHTML = content;
+    modal.querySelector('.modal-dialog').className = `modal-dialog modal-${size} modal-dialog-scrollable`;
+
+    // Mostra modal
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+}
+</script>
+{% endblock %}
