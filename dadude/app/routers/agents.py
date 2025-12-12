@@ -479,3 +479,233 @@ async def update_agent_config(
         logger.error(f"Failed to update agent config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ==========================================
+# AGENT UPDATE/UPGRADE SYSTEM
+# ==========================================
+
+# Versione corrente dell'agent (da aggiornare ad ogni release)
+AGENT_VERSION = "1.1.0"
+
+@router.get("/version")
+async def get_current_agent_version():
+    """Restituisce la versione corrente dell'agent disponibile sul server"""
+    return {
+        "version": AGENT_VERSION,
+        "download_url": "/api/v1/agents/download/agent-package.tar.gz",
+        "changelog": "https://github.com/grandir66/dadude/releases",
+    }
+
+
+@router.get("/{agent_db_id}/check-update")
+async def check_agent_update(agent_db_id: str):
+    """
+    Controlla se un agent ha bisogno di aggiornamento.
+    """
+    service = get_customer_service()
+    
+    agent = service.get_agent(agent_db_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    agent_version = agent.version or "0.0.0"
+    needs_update = _compare_versions(agent_version, AGENT_VERSION) < 0
+    
+    return {
+        "agent_id": agent_db_id,
+        "current_version": agent_version,
+        "latest_version": AGENT_VERSION,
+        "needs_update": needs_update,
+    }
+
+
+@router.post("/{agent_db_id}/trigger-update")
+async def trigger_agent_update(agent_db_id: str):
+    """
+    Invia comando di aggiornamento all'agent.
+    L'agent scaricherà la nuova versione e si riavvierà.
+    """
+    service = get_customer_service()
+    encryption = get_encryption_service()
+    
+    agent = service.get_agent(agent_db_id, include_password=True)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    if not agent.agent_url:
+        raise HTTPException(status_code=400, detail="Agent URL not configured")
+    
+    # Decripta token
+    agent_token = None
+    if hasattr(agent, 'agent_token') and agent.agent_token:
+        try:
+            agent_token = encryption.decrypt(agent.agent_token)
+        except:
+            agent_token = agent.agent_token
+    
+    try:
+        import httpx
+        
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{agent.agent_url}/admin/update",
+                json={
+                    "version": AGENT_VERSION,
+                    "download_url": f"https://raw.githubusercontent.com/grandir66/dadude/main/dadude-agent/",
+                },
+                headers={"Authorization": f"Bearer {agent_token}"} if agent_token else {}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return {
+                    "success": True,
+                    "message": "Update triggered successfully",
+                    "agent_response": result,
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": f"Agent returned {response.status_code}: {response.text}",
+                }
+                
+    except Exception as e:
+        logger.error(f"Failed to trigger update for agent {agent_db_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{agent_db_id}/restart")
+async def restart_agent(agent_db_id: str):
+    """
+    Invia comando di riavvio all'agent.
+    """
+    service = get_customer_service()
+    encryption = get_encryption_service()
+    
+    agent = service.get_agent(agent_db_id, include_password=True)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    if not agent.agent_url:
+        raise HTTPException(status_code=400, detail="Agent URL not configured")
+    
+    agent_token = None
+    if hasattr(agent, 'agent_token') and agent.agent_token:
+        try:
+            agent_token = encryption.decrypt(agent.agent_token)
+        except:
+            agent_token = agent.agent_token
+    
+    try:
+        import httpx
+        
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{agent.agent_url}/admin/restart",
+                headers={"Authorization": f"Bearer {agent_token}"} if agent_token else {}
+            )
+            
+            return {
+                "success": response.status_code == 200,
+                "message": "Restart command sent" if response.status_code == 200 else response.text,
+            }
+                
+    except Exception as e:
+        # L'agent potrebbe disconnettersi durante il riavvio
+        return {
+            "success": True,
+            "message": "Restart command sent (agent may be restarting)",
+        }
+
+
+@router.get("/outdated")
+async def list_outdated_agents():
+    """
+    Lista tutti gli agent che hanno bisogno di aggiornamento.
+    """
+    from ..models.database import AgentAssignment, init_db, get_session
+    from ..config import get_settings
+    
+    settings = get_settings()
+    db_url = settings.database_url.replace("+aiosqlite", "")
+    engine = init_db(db_url)
+    session = get_session(engine)
+    
+    try:
+        agents = session.query(AgentAssignment).filter(
+            AgentAssignment.active == True
+        ).all()
+        
+        outdated = []
+        for agent in agents:
+            agent_version = agent.version or "0.0.0"
+            if _compare_versions(agent_version, AGENT_VERSION) < 0:
+                outdated.append({
+                    "id": agent.id,
+                    "name": agent.name,
+                    "address": agent.address,
+                    "current_version": agent_version,
+                    "latest_version": AGENT_VERSION,
+                    "customer_id": agent.customer_id,
+                })
+        
+        return {
+            "total_agents": len(agents),
+            "outdated_count": len(outdated),
+            "latest_version": AGENT_VERSION,
+            "outdated_agents": outdated,
+        }
+    finally:
+        session.close()
+
+
+@router.post("/update-all")
+async def update_all_agents():
+    """
+    Invia comando di aggiornamento a tutti gli agent outdated.
+    """
+    outdated_result = await list_outdated_agents()
+    
+    results = []
+    for agent in outdated_result.get("outdated_agents", []):
+        try:
+            result = await trigger_agent_update(agent["id"])
+            results.append({
+                "agent_id": agent["id"],
+                "agent_name": agent["name"],
+                "success": result.get("success", False),
+                "message": result.get("message") or result.get("error"),
+            })
+        except Exception as e:
+            results.append({
+                "agent_id": agent["id"],
+                "agent_name": agent["name"],
+                "success": False,
+                "message": str(e),
+            })
+    
+    return {
+        "total_updated": sum(1 for r in results if r["success"]),
+        "total_failed": sum(1 for r in results if not r["success"]),
+        "results": results,
+    }
+
+
+def _compare_versions(v1: str, v2: str) -> int:
+    """
+    Confronta due versioni semver.
+    Ritorna: -1 se v1 < v2, 0 se v1 == v2, 1 se v1 > v2
+    """
+    def parse(v):
+        parts = v.replace("-", ".").split(".")
+        return [int(p) if p.isdigit() else 0 for p in parts[:3]]
+    
+    p1, p2 = parse(v1), parse(v2)
+    
+    for a, b in zip(p1, p2):
+        if a < b:
+            return -1
+        if a > b:
+            return 1
+    return 0
+

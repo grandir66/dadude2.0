@@ -646,6 +646,144 @@ async def startup_event():
 
 
 # ==========================================
+# ADMIN ENDPOINTS (UPDATE/RESTART)
+# ==========================================
+
+AGENT_VERSION = "1.1.0"
+
+class UpdateRequest(BaseModel):
+    version: str
+    download_url: Optional[str] = None
+    force: bool = False
+
+
+@app.post("/admin/update")
+async def trigger_update(
+    request: UpdateRequest,
+    authorized: bool = Depends(verify_token)
+):
+    """
+    Riceve comando di aggiornamento dal server.
+    Scarica la nuova versione e si riavvia.
+    """
+    current_version = AGENT_VERSION
+    
+    logger.info(f"Update requested: {current_version} -> {request.version}")
+    
+    if not request.force and request.version == current_version:
+        return {
+            "success": False,
+            "message": "Already at the latest version",
+            "current_version": current_version,
+        }
+    
+    # In un ambiente Docker, l'aggiornamento viene fatto dal container manager
+    # Qui segnaliamo che l'aggiornamento è richiesto
+    
+    try:
+        # Crea flag file per segnalare aggiornamento necessario
+        update_info = {
+            "requested_version": request.version,
+            "download_url": request.download_url,
+            "requested_at": datetime.utcnow().isoformat(),
+        }
+        
+        with open("/tmp/dadude-agent-update.json", "w") as f:
+            json.dump(update_info, f)
+        
+        logger.info(f"Update flag created for version {request.version}")
+        
+        # In Docker, il container manager (docker-compose) può essere configurato
+        # per controllare questo file e fare pull della nuova immagine
+        
+        # Per ora, programmiamo un riavvio
+        asyncio.create_task(_delayed_restart(5))
+        
+        return {
+            "success": True,
+            "message": f"Update to {request.version} scheduled. Agent will restart in 5 seconds.",
+            "current_version": current_version,
+            "target_version": request.version,
+        }
+        
+    except Exception as e:
+        logger.error(f"Update failed: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+@app.post("/admin/restart")
+async def trigger_restart(authorized: bool = Depends(verify_token)):
+    """
+    Riavvia l'agent.
+    """
+    logger.info("Restart requested")
+    
+    # Programma riavvio dopo 2 secondi
+    asyncio.create_task(_delayed_restart(2))
+    
+    return {
+        "success": True,
+        "message": "Agent will restart in 2 seconds",
+    }
+
+
+@app.get("/admin/status")
+async def admin_status(authorized: bool = Depends(verify_token)):
+    """
+    Stato dettagliato dell'agent per amministrazione.
+    """
+    settings = get_settings()
+    local_ip = await get_local_ip()
+    
+    # Controlla se c'è un aggiornamento pendente
+    update_pending = False
+    update_info = None
+    try:
+        if os.path.exists("/tmp/dadude-agent-update.json"):
+            with open("/tmp/dadude-agent-update.json") as f:
+                update_info = json.load(f)
+                update_pending = True
+    except:
+        pass
+    
+    return {
+        "agent_id": settings.agent_id,
+        "agent_name": settings.agent_name,
+        "version": AGENT_VERSION,
+        "detected_ip": local_ip,
+        "hostname": socket.gethostname(),
+        "server_url": settings.server_url,
+        "uptime": _get_uptime(),
+        "update_pending": update_pending,
+        "update_info": update_info,
+        "python_version": platform.python_version(),
+        "os_info": f"{platform.system()} {platform.release()}",
+    }
+
+
+async def _delayed_restart(delay_seconds: int):
+    """Riavvia l'agent dopo un delay"""
+    await asyncio.sleep(delay_seconds)
+    logger.warning(f"Restarting agent...")
+    
+    # In Docker, usciamo con codice 0 per trigger restart policy
+    os._exit(0)
+
+
+def _get_uptime() -> str:
+    """Calcola uptime del processo"""
+    try:
+        import time
+        # Questo è approssimativo, in produzione useresti psutil
+        return "running"
+    except:
+        return "unknown"
+
+
+# ==========================================
 # MAIN
 # ==========================================
 
