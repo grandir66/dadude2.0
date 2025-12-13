@@ -503,6 +503,36 @@ async def auto_detect_device(
                     if open_ports:
                         device.open_ports = json.dumps(open_ports) if isinstance(open_ports, list) else open_ports
                     
+                    # Salva dati extra nel campo custom_fields
+                    extra_fields = {}
+                    
+                    # Dati Windows/Linux dettagliati
+                    extra_field_names = [
+                        "server_roles", "installed_software", "network_adapters", "local_users",
+                        "important_services", "memory_modules", "disks", "antivirus",
+                        "domain_role", "is_server", "is_domain_controller", "last_boot",
+                        "install_date", "registered_user", "organization", "system_type",
+                        "cpu_speed_mhz", "cpu_threads", "cpu_manufacturer", "bios_version", "bios_manufacturer",
+                        "shell_users", "docker_containers_running", "lxc_containers", "vms",
+                        "virtualization", "timezone", "uptime", "last_login", "kernel",
+                        "interface_count", "license_level", "firmware"
+                    ]
+                    
+                    for field in extra_field_names:
+                        if field in scan_result and scan_result[field]:
+                            extra_fields[field] = scan_result[field]
+                    
+                    if extra_fields:
+                        # Merge con custom_fields esistenti
+                        existing = device.custom_fields or {}
+                        if isinstance(existing, str):
+                            try:
+                                existing = json.loads(existing)
+                            except:
+                                existing = {}
+                        existing.update(extra_fields)
+                        device.custom_fields = existing
+                    
                     # Timestamp
                     from datetime import datetime
                     device.last_scan = datetime.utcnow()

@@ -3264,6 +3264,177 @@ async function viewInventoryDevice(deviceId) {
             `;
         }
 
+        // Parse custom_fields for extra data
+        const cf = device.custom_fields ? (typeof device.custom_fields === 'string' ? JSON.parse(device.custom_fields) : device.custom_fields) : {};
+        
+        // Server Roles (Windows)
+        const serverRoles = device.server_roles || cf.server_roles;
+        if (serverRoles && serverRoles.length > 0) {
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Ruoli Server (${serverRoles.length})</h6>
+                <div class="d-flex flex-wrap gap-1">
+                    ${serverRoles.map(role => `<span class="badge bg-primary">${role}</span>`).join('')}
+                </div>
+            `;
+        }
+
+        // Important Services
+        const importantServices = device.important_services || cf.important_services;
+        if (importantServices && importantServices.length > 0) {
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Servizi Importanti (${importantServices.length})</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead><tr><th>Nome</th><th>Descrizione</th><th>Stato</th><th>Avvio</th></tr></thead>
+                        <tbody>
+                            ${importantServices.map(svc => `
+                                <tr>
+                                    <td><code>${svc.name || svc}</code></td>
+                                    <td><small>${svc.display_name || '-'}</small></td>
+                                    <td><span class="badge bg-${svc.state === 'Running' ? 'success' : 'secondary'}">${svc.state || '-'}</span></td>
+                                    <td><small>${svc.start_mode || '-'}</small></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        // Network Adapters (WMI/SSH collected)
+        const networkAdapters = device.network_adapters || cf.network_adapters;
+        if (networkAdapters && networkAdapters.length > 0) {
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Schede di Rete (${networkAdapters.length})</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead><tr><th>Nome</th><th>MAC</th><th>IP</th><th>Gateway</th><th>DNS</th></tr></thead>
+                        <tbody>
+                            ${networkAdapters.map(nic => `
+                                <tr>
+                                    <td><small>${nic.name || nic.description || '-'}</small></td>
+                                    <td><code>${nic.mac || '-'}</code></td>
+                                    <td><small>${Array.isArray(nic.ips) ? nic.ips.filter(ip => !ip.includes(':')).join(', ') : (nic.ips || '-')}</small></td>
+                                    <td><small>${Array.isArray(nic.gateway) ? nic.gateway.join(', ') : (nic.gateway || '-')}</small></td>
+                                    <td><small>${Array.isArray(nic.dns) ? nic.dns.join(', ') : (nic.dns || '-')}</small></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        // Installed Software
+        const installedSoftware = device.installed_software || cf.installed_software;
+        if (installedSoftware && installedSoftware.length > 0) {
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Software Installato (${installedSoftware.length})</h6>
+                <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                    <table class="table table-sm table-striped">
+                        <thead><tr><th>Nome</th><th>Versione</th><th>Produttore</th></tr></thead>
+                        <tbody>
+                            ${installedSoftware.map(sw => `
+                                <tr>
+                                    <td><small>${sw.name}</small></td>
+                                    <td><small>${sw.version || '-'}</small></td>
+                                    <td><small>${sw.vendor || '-'}</small></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        // Local Users
+        const localUsers = device.local_users || cf.local_users;
+        if (localUsers && localUsers.length > 0) {
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Utenti Locali (${localUsers.length})</h6>
+                <div class="d-flex flex-wrap gap-2">
+                    ${localUsers.map(user => `
+                        <span class="badge ${user.disabled ? 'bg-secondary' : 'bg-info'}">
+                            ${user.name} ${user.disabled ? '(disabilitato)' : ''}
+                        </span>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // Memory Modules
+        const memoryModules = device.memory_modules || cf.memory_modules;
+        if (memoryModules && memoryModules.length > 0) {
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Moduli RAM (${memoryModules.length})</h6>
+                <div class="d-flex flex-wrap gap-2">
+                    ${memoryModules.map(mod => `
+                        <span class="badge bg-secondary">
+                            ${mod.size_gb || '?'} GB ${mod.speed_mhz ? '@ ' + mod.speed_mhz + ' MHz' : ''} 
+                            ${mod.manufacturer ? '(' + mod.manufacturer + ')' : ''}
+                        </span>
+                    `).join('')}
+                </div>
+            `;
+        }
+        
+        // Disks from custom_fields
+        const cfDisks = cf.disks;
+        if (cfDisks && cfDisks.length > 0 && (!device.disks || device.disks.length === 0)) {
+            detailsHtml += `
+                <hr>
+                <h6 class="text-muted mb-3">Dischi (${cfDisks.length})</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped">
+                        <thead><tr><th>Unità</th><th>FS</th><th>Etichetta</th><th>Dimensione</th><th>Libero</th></tr></thead>
+                        <tbody>
+                            ${cfDisks.map(disk => `
+                                <tr>
+                                    <td><code>${disk.device || disk.mount || '-'}</code></td>
+                                    <td>${disk.filesystem || '-'}</td>
+                                    <td>${disk.label || '-'}</td>
+                                    <td>${disk.size_gb ? disk.size_gb + ' GB' : '-'}</td>
+                                    <td>${disk.free_gb ? disk.free_gb + ' GB' : '-'}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        // Extra Info from custom_fields
+        if (Object.keys(cf).length > 0) {
+            const hasExtraInfo = cf.domain_role || cf.is_server !== undefined || cf.virtualization || 
+                                 cf.timezone || cf.docker_containers_running !== undefined || cf.uptime || cf.last_boot;
+            if (hasExtraInfo) {
+                detailsHtml += `
+                    <hr>
+                    <h6 class="text-muted mb-3">Informazioni Aggiuntive</h6>
+                    <div class="row">
+                        ${cf.domain_role ? '<div class="col-md-4 mb-2"><strong>Ruolo Dominio:</strong> ' + cf.domain_role + '</div>' : ''}
+                        ${cf.is_server !== undefined ? '<div class="col-md-4 mb-2"><strong>Server:</strong> ' + (cf.is_server ? 'Sì' : 'No') + '</div>' : ''}
+                        ${cf.is_domain_controller !== undefined ? '<div class="col-md-4 mb-2"><strong>DC:</strong> ' + (cf.is_domain_controller ? 'Sì' : 'No') + '</div>' : ''}
+                        ${cf.virtualization ? '<div class="col-md-4 mb-2"><strong>Virtualizzazione:</strong> ' + cf.virtualization + '</div>' : ''}
+                        ${cf.timezone ? '<div class="col-md-4 mb-2"><strong>Timezone:</strong> ' + cf.timezone + '</div>' : ''}
+                        ${cf.docker_containers_running !== undefined ? '<div class="col-md-4 mb-2"><strong>Container Docker:</strong> ' + cf.docker_containers_running + '</div>' : ''}
+                        ${cf.lxc_containers !== undefined ? '<div class="col-md-4 mb-2"><strong>Container LXC:</strong> ' + cf.lxc_containers + '</div>' : ''}
+                        ${cf.vms !== undefined ? '<div class="col-md-4 mb-2"><strong>VM:</strong> ' + cf.vms + '</div>' : ''}
+                        ${cf.last_boot ? '<div class="col-md-4 mb-2"><strong>Ultimo Boot:</strong> ' + cf.last_boot + '</div>' : ''}
+                        ${cf.uptime ? '<div class="col-md-4 mb-2"><strong>Uptime:</strong> ' + cf.uptime + '</div>' : ''}
+                        ${cf.kernel ? '<div class="col-md-4 mb-2"><strong>Kernel:</strong> ' + cf.kernel + '</div>' : ''}
+                        ${cf.bios_version ? '<div class="col-md-4 mb-2"><strong>BIOS:</strong> ' + cf.bios_version + '</div>' : ''}
+                    </div>
+                `;
+            }
+        }
+
         // Note e descrizione
         if (device.description || device.notes) {
             detailsHtml += `
