@@ -25,9 +25,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install docker-compose for self-update capability
-RUN curl -SL "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-linux-x86_64" \
-    -o /usr/local/bin/docker-compose && chmod +x /usr/local/bin/docker-compose
+# Install Docker CLI for self-update capability
+RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz | \
+    tar xz -C /tmp && \
+    mv /tmp/docker/docker /usr/local/bin/docker && \
+    rm -rf /tmp/docker && \
+    chmod +x /usr/local/bin/docker
+
+# Install docker-compose plugin
+RUN mkdir -p /usr/local/lib/docker/cli-plugins && \
+    curl -SL "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-linux-x86_64" \
+    -o /usr/local/lib/docker/cli-plugins/docker-compose && \
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose && \
+    ln -s /usr/local/lib/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
 
 # Copy requirements first for caching
 COPY requirements.txt .
