@@ -773,8 +773,51 @@ async def verify_agent_version(agent_db_id: str):
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
+    # Prima verifica se l'agent è connesso via WebSocket
+    from ..services.websocket_hub import get_websocket_hub
+    hub = get_websocket_hub()
+    
+    # Cerca connessione WebSocket attiva per questo agent
+    ws_agent_id = None
+    for conn_id in hub._connections.keys():
+        # L'agent potrebbe essere connesso con un ID tipo "agent-name-12345"
+        if agent.name and agent.name in conn_id:
+            ws_agent_id = conn_id
+            break
+    
+    if ws_agent_id and ws_agent_id in hub._connections:
+        # Agent connesso via WebSocket - è online
+        real_version = agent.version or "2.0.0"
+        
+        # Aggiorna status nel database
+        service.update_agent_status(agent_db_id, status="online", version=real_version)
+        
+        needs_update = _compare_versions(real_version, AGENT_VERSION) < 0
+        
+        return {
+            "success": True,
+            "agent_id": agent_db_id,
+            "agent_name": agent.name,
+            "db_version": agent.version or "N/A",
+            "real_version": real_version,
+            "latest_version": AGENT_VERSION,
+            "needs_update": needs_update,
+            "version_match": (agent.version or "") == real_version,
+            "agent_online": True,
+            "connection_type": "websocket",
+            "ws_agent_id": ws_agent_id,
+        }
+    
+    # Fallback a HTTP per agent non WebSocket
     if not agent.agent_url:
-        raise HTTPException(status_code=400, detail="Agent URL not configured")
+        # Agent WebSocket senza connessione attiva
+        return {
+            "success": False,
+            "agent_id": agent_db_id,
+            "agent_name": agent.name,
+            "agent_online": False,
+            "error": "Agent not connected (WebSocket mode)",
+        }
     
     # Decripta token
     agent_token = None
@@ -813,6 +856,7 @@ async def verify_agent_version(agent_db_id: str):
                     "needs_update": needs_update,
                     "version_match": (agent.version or "") == real_version,
                     "agent_online": True,
+                    "connection_type": "http",
                     "agent_info": {
                         "agent_id": data.get("agent_id"),
                         "agent_name": data.get("agent_name"),
