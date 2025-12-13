@@ -31,12 +31,18 @@ async def probe(
         
         logger.debug(f"WMI probe: connecting to {target} as {domain}\\{username}")
         
+        # Converti parametri in bytes per compatibilità impacket
+        # Alcune versioni di impacket hanno bug con stringhe Python 3
+        user_bytes = username.encode('utf-8') if isinstance(username, str) else username
+        pass_bytes = password.encode('utf-8') if isinstance(password, str) else password
+        domain_bytes = domain.encode('utf-8') if isinstance(domain, str) else domain
+        
         # Connessione DCOM
         dcom = DCOMConnection(
             target,
-            username=username,
-            password=password,
-            domain=domain
+            username=user_bytes,
+            password=pass_bytes,
+            domain=domain_bytes
         )
         
         # Query WMI
