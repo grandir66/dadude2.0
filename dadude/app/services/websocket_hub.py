@@ -39,6 +39,7 @@ class CommandType(str, Enum):
     PROBE_SSH = "probe_ssh"
     PROBE_SNMP = "probe_snmp"
     PORT_SCAN = "port_scan"
+    SCAN_PORTS = "port_scan"  # Alias per compatibilità
     DNS_REVERSE = "dns_reverse"
     UPDATE_AGENT = "update_agent"
     RESTART = "restart"

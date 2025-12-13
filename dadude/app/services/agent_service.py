@@ -1,9 +1,10 @@
 """
 DaDude - Agent Service
 Servizio unificato per gestire agent MikroTik e Docker
+Supporta sia agent HTTP legacy che WebSocket
 """
 import asyncio
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass
 from loguru import logger
 
@@ -12,6 +13,7 @@ from .mikrotik_service import get_mikrotik_service
 from .device_probe_service import MikroTikAgent
 from .customer_service import get_customer_service
 from .encryption_service import get_encryption_service
+from .websocket_hub import get_websocket_hub, CommandType
 
 
 @dataclass
@@ -110,8 +112,51 @@ class AgentService:
         
         return result
     
+    def _get_ws_agent_id(self, agent_info: Dict[str, Any]) -> Optional[str]:
+        """
+        Cerca l'agent_id WebSocket per un agent.
+        Ritorna l'ID se l'agent è connesso via WebSocket, altrimenti None.
+        """
+        hub = get_websocket_hub()
+        agent_name = agent_info.get("name", "")
+        
+        # Cerca connessione WebSocket che contiene il nome agent
+        for conn_id in hub._connections.keys():
+            if agent_name and agent_name in conn_id:
+                return conn_id
+        
+        return None
+    
+    async def _execute_via_websocket(
+        self,
+        ws_agent_id: str,
+        command: CommandType,
+        params: Dict[str, Any],
+        timeout: float = 60.0,
+    ) -> Dict[str, Any]:
+        """Esegue un comando via WebSocket Hub"""
+        hub = get_websocket_hub()
+        
+        result = await hub.send_command(
+            ws_agent_id,
+            command,
+            params=params,
+            timeout=timeout,
+        )
+        
+        if result.status == "success":
+            return {
+                "success": True,
+                "data": result.data,
+            }
+        else:
+            return {
+                "success": False,
+                "error": result.error or "WebSocket command failed",
+            }
+    
     def _get_docker_client(self, agent_info: Dict[str, Any]) -> AgentClient:
-        """Crea/ottiene client per agent Docker"""
+        """Crea/ottiene client per agent Docker (HTTP legacy)"""
         agent_id = agent_info["id"]
         
         # URL dell'agent
@@ -153,6 +198,7 @@ class AgentService:
         """
         Esegue probe WMI via agent.
         Solo agent Docker può eseguire WMI.
+        Supporta sia WebSocket che HTTP.
         """
         agent_type = agent_info.get("agent_type", "mikrotik")
         
@@ -166,13 +212,32 @@ class AgentService:
             )
         
         try:
-            client = self._get_docker_client(agent_info)
-            result = await client.probe_wmi(
-                target=target,
-                username=username,
-                password=password,
-                domain=domain,
-            )
+            # Prima prova WebSocket
+            ws_agent_id = self._get_ws_agent_id(agent_info)
+            
+            if ws_agent_id:
+                logger.info(f"Executing WMI probe via WebSocket to {target}")
+                result = await self._execute_via_websocket(
+                    ws_agent_id,
+                    CommandType.PROBE_WMI,
+                    params={
+                        "target": target,
+                        "username": username,
+                        "password": password,
+                        "domain": domain,
+                    },
+                    timeout=120.0,
+                )
+            else:
+                # Fallback a HTTP
+                logger.info(f"Executing WMI probe via HTTP to {target}")
+                client = self._get_docker_client(agent_info)
+                result = await client.probe_wmi(
+                    target=target,
+                    username=username,
+                    password=password,
+                    domain=domain,
+                )
             
             return AgentProbeResult(
                 success=result.get("success", False),
@@ -205,6 +270,7 @@ class AgentService:
         """
         Esegue probe SSH via agent.
         Solo agent Docker può eseguire SSH probe.
+        Supporta sia WebSocket che HTTP.
         """
         agent_type = agent_info.get("agent_type", "mikrotik")
         
@@ -218,14 +284,34 @@ class AgentService:
             )
         
         try:
-            client = self._get_docker_client(agent_info)
-            result = await client.probe_ssh(
-                target=target,
-                username=username,
-                password=password,
-                private_key=private_key,
-                port=port,
-            )
+            # Prima prova WebSocket
+            ws_agent_id = self._get_ws_agent_id(agent_info)
+            
+            if ws_agent_id:
+                logger.info(f"Executing SSH probe via WebSocket to {target}")
+                result = await self._execute_via_websocket(
+                    ws_agent_id,
+                    CommandType.PROBE_SSH,
+                    params={
+                        "target": target,
+                        "username": username,
+                        "password": password,
+                        "private_key": private_key,
+                        "port": port,
+                    },
+                    timeout=60.0,
+                )
+            else:
+                # Fallback a HTTP
+                logger.info(f"Executing SSH probe via HTTP to {target}")
+                client = self._get_docker_client(agent_info)
+                result = await client.probe_ssh(
+                    target=target,
+                    username=username,
+                    password=password,
+                    private_key=private_key,
+                    port=port,
+                )
             
             return AgentProbeResult(
                 success=result.get("success", False),
@@ -257,6 +343,7 @@ class AgentService:
         """
         Esegue probe SNMP via agent.
         Solo agent Docker può eseguire SNMP probe.
+        Supporta sia WebSocket che HTTP.
         """
         agent_type = agent_info.get("agent_type", "mikrotik")
         
@@ -270,13 +357,32 @@ class AgentService:
             )
         
         try:
-            client = self._get_docker_client(agent_info)
-            result = await client.probe_snmp(
-                target=target,
-                community=community,
-                version=version,
-                port=port,
-            )
+            # Prima prova WebSocket
+            ws_agent_id = self._get_ws_agent_id(agent_info)
+            
+            if ws_agent_id:
+                logger.info(f"Executing SNMP probe via WebSocket to {target}")
+                result = await self._execute_via_websocket(
+                    ws_agent_id,
+                    CommandType.PROBE_SNMP,
+                    params={
+                        "target": target,
+                        "community": community,
+                        "version": version,
+                        "port": port,
+                    },
+                    timeout=60.0,
+                )
+            else:
+                # Fallback a HTTP
+                logger.info(f"Executing SNMP probe via HTTP to {target}")
+                client = self._get_docker_client(agent_info)
+                result = await client.probe_snmp(
+                    target=target,
+                    community=community,
+                    version=version,
+                    port=port,
+                )
             
             return AgentProbeResult(
                 success=result.get("success", False),
@@ -305,16 +411,40 @@ class AgentService:
     ) -> Dict[str, Any]:
         """
         Esegue port scan via agent.
-        Docker: usa API agent
+        Docker: usa API agent (WebSocket o HTTP)
         MikroTik: usa /tool fetch per ogni porta
         """
         agent_type = agent_info.get("agent_type", "mikrotik")
         
         try:
             if agent_type == "docker":
-                client = self._get_docker_client(agent_info)
-                result = await client.scan_ports(target, ports)
-                return result
+                # Prima prova WebSocket
+                ws_agent_id = self._get_ws_agent_id(agent_info)
+                
+                if ws_agent_id:
+                    logger.info(f"Executing port scan via WebSocket to {target}")
+                    result = await self._execute_via_websocket(
+                        ws_agent_id,
+                        CommandType.SCAN_PORTS,
+                        params={
+                            "target": target,
+                            "ports": ports,
+                        },
+                        timeout=120.0,
+                    )
+                    if result.get("success"):
+                        return {
+                            "success": True,
+                            "target": target,
+                            "open_ports": result.get("data", {}).get("open_ports", []),
+                        }
+                    return result
+                else:
+                    # Fallback a HTTP
+                    logger.info(f"Executing port scan via HTTP to {target}")
+                    client = self._get_docker_client(agent_info)
+                    result = await client.scan_ports(target, ports)
+                    return result
             else:
                 # MikroTik nativo: scan limitato via API
                 mikrotik = self._get_mikrotik_agent(agent_info)
