@@ -1,7 +1,10 @@
 #!/bin/bash
 #
-# DaDude Agent - Script di aggiornamento standalone
+# DaDude Server - Script di aggiornamento standalone
 # Uso: ./update.sh [--restart]
+#
+# Questo script è indipendente dal codice del server
+# e può essere usato anche quando il sistema di update della UI non funziona
 #
 
 set -e
@@ -14,7 +17,7 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo -e "${YELLOW}=== DaDude Agent Update ===${NC}"
+echo -e "${YELLOW}=== DaDude Server Update ===${NC}"
 echo "Directory: $SCRIPT_DIR"
 echo ""
 
@@ -25,7 +28,7 @@ if ! command -v git &> /dev/null; then
 fi
 
 # Mostra versione corrente
-CURRENT_VERSION=$(grep -oP 'AGENT_VERSION\s*=\s*"\K[^"]+' app/agent.py 2>/dev/null || echo "unknown")
+CURRENT_VERSION=$(grep -oP 'SERVER_VERSION\s*=\s*"\K[^"]+' app/routers/agents.py 2>/dev/null || echo "unknown")
 echo -e "Versione corrente: ${YELLOW}v${CURRENT_VERSION}${NC}"
 
 # Fetch updates
@@ -56,12 +59,12 @@ echo -e "${YELLOW}Scarico aggiornamenti...${NC}"
 git pull --rebase origin main
 
 # Nuova versione
-NEW_VERSION=$(grep -oP 'AGENT_VERSION\s*=\s*"\K[^"]+' app/agent.py 2>/dev/null || echo "unknown")
+NEW_VERSION=$(grep -oP 'SERVER_VERSION\s*=\s*"\K[^"]+' app/routers/agents.py 2>/dev/null || echo "unknown")
 echo -e "Nuova versione: ${GREEN}v${NEW_VERSION}${NC}"
 echo ""
 
 # Se in Docker, rebuild
-if [ -f "docker-compose.yml" ]; then
+if [ -f "/.dockerenv" ] || [ -f "docker-compose.yml" ]; then
     if [ "$1" = "--restart" ]; then
         echo -e "${YELLOW}Ricostruisco container...${NC}"
         docker compose build --quiet
@@ -78,3 +81,4 @@ fi
 
 echo ""
 echo -e "${GREEN}✓ Aggiornamento completato${NC}"
+
