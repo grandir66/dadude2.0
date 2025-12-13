@@ -179,12 +179,35 @@ async def probe(
                     if 'upnpmodelname' in line.lower():
                         info["model"] = line.split('=')[-1].strip().strip('"')
             
-            # Proxmox
-            if 'proxmox' in os_release.lower():
+            # Proxmox VE Detection (più robusta - Proxmox è basato su Debian)
+            pve_ver = exec_cmd("pveversion 2>/dev/null")
+            if pve_ver and 'pve-manager' in pve_ver.lower():
                 info["device_type"] = "hypervisor"
-                pve_ver = exec_cmd("pveversion 2>/dev/null")
-                if pve_ver:
-                    info["os_version"] = pve_ver
+                info["category"] = "hypervisor"
+                info["os_name"] = "Proxmox VE"
+                info["os_family"] = "Proxmox VE"
+                info["manufacturer"] = "Proxmox Server Solutions GmbH"
+                info["os_version"] = pve_ver
+                # Conta container e VM
+                lxc = exec_cmd("pct list 2>/dev/null | tail -n +2 | wc -l")
+                if lxc.isdigit():
+                    info["lxc_containers"] = int(lxc)
+                vms = exec_cmd("qm list 2>/dev/null | tail -n +2 | wc -l")
+                if vms.isdigit():
+                    info["vms"] = int(vms)
+                # Cluster info
+                cluster = exec_cmd("pvecm status 2>/dev/null | grep 'Cluster Name' | cut -d: -f2")
+                if cluster:
+                    info["cluster_name"] = cluster.strip()
+                # Storage
+                storage = exec_cmd("pvesm status 2>/dev/null | tail -n +2 | wc -l")
+                if storage.isdigit():
+                    info["storage_count"] = int(storage)
+            elif 'proxmox' in os_release.lower():
+                info["device_type"] = "hypervisor"
+                info["category"] = "hypervisor"
+                info["os_name"] = "Proxmox VE"
+                info["manufacturer"] = "Proxmox Server Solutions GmbH"
             
             # Default device type
             if not info.get("device_type"):

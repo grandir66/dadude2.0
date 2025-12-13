@@ -717,7 +717,7 @@ async def update_agent_config(
 # ==========================================
 
 # Versione corrente dell'agent (da aggiornare ad ogni release)
-AGENT_VERSION = "1.3.0"
+AGENT_VERSION = "1.3.1"
 
 @router.get("/version")
 async def get_current_agent_version():
