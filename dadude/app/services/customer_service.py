@@ -1154,6 +1154,19 @@ class CustomerService:
             if agent:
                 return self._to_agent_safe(agent)
             
+            # Cerca per nome contenuto nell'agent_unique_id (es: "agent-test1-3865" contiene "test1")
+            # Estrai il nome base rimuovendo prefisso "agent-" e suffisso numerico
+            import re
+            name_match = re.match(r'^agent-(.+?)-\d+$', agent_unique_id)
+            if name_match:
+                base_name = name_match.group(1)
+                agent = session.query(AgentAssignmentDB).filter(
+                    AgentAssignmentDB.name == base_name
+                ).first()
+                
+                if agent:
+                    return self._to_agent_safe(agent)
+            
             # Cerca per indirizzo IP (se fornito)
             if address:
                 agent = session.query(AgentAssignmentDB).filter(
@@ -1170,6 +1183,14 @@ class CustomerService:
             
             if agent:
                 return self._to_agent_safe(agent)
+            
+            # Cerca per nome parziale (l'agent_unique_id contiene il nome)
+            all_agents = session.query(AgentAssignmentDB).filter(
+                AgentAssignmentDB.active == True
+            ).all()
+            for a in all_agents:
+                if a.name and a.name in agent_unique_id:
+                    return self._to_agent_safe(a)
             
             return None
             
