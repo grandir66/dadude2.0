@@ -263,24 +263,16 @@ class DaDudeAgent:
         try:
             import httpx
             import platform
-            import socket
             
-            # Rileva IP locale
-            detected_ip = None
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                detected_ip = s.getsockname()[0]
-                s.close()
-            except Exception:
-                pass
+            # Non inviamo detected_ip - il server lo rileverà dalla connessione HTTP
+            # Questo evita problemi con IP interni Docker
             
             registration_data = {
                 "agent_id": self.agent_id,
                 "agent_name": self.agent_name,
                 "agent_type": "docker",
                 "version": AGENT_VERSION,
-                "detected_ip": detected_ip,
+                "detected_ip": None,  # Server userà request.client.host
                 "detected_hostname": platform.node(),
                 "capabilities": ["ssh", "snmp", "wmi", "nmap", "dns"],
                 "os_info": platform.platform(),
