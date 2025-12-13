@@ -1157,10 +1157,21 @@ async def scan_customer_networks(
                     if result.status == "success":
                         scan_result = result.data or {}
                         scan_result["success"] = True
-                        # L'agent restituisce "hosts", normalizziamo a "devices"
+                        # L'agent restituisce "hosts" con campo "mac", normalizziamo
                         hosts = scan_result.get("hosts", scan_result.get("devices", []))
-                        scan_result["devices"] = hosts
-                        scan_result["devices_found"] = len(hosts)
+                        # Normalizza campi: mac -> mac_address, ip -> address
+                        normalized_devices = []
+                        for h in hosts:
+                            device = {
+                                "address": h.get("ip", h.get("address", "")),
+                                "mac_address": h.get("mac", h.get("mac_address", "")),
+                                "vendor": h.get("vendor", ""),
+                                "hostname": h.get("hostname", ""),
+                                "status": h.get("status", "up"),
+                            }
+                            normalized_devices.append(device)
+                        scan_result["devices"] = normalized_devices
+                        scan_result["devices_found"] = len(normalized_devices)
                         logger.info(f"[SCAN VIA WEBSOCKET] Scan completed: {scan_result.get('devices_found', 0)} devices found")
                     else:
                         logger.error(f"WebSocket scan failed: {result.error}")
