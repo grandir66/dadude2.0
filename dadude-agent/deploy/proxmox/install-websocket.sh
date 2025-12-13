@@ -86,24 +86,26 @@ echo ""
 # === CONFIGURAZIONE SERVER ===
 echo -e "${BLUE}--- Server DaDude ---${NC}"
 
-if [ -z "$SERVER_URL" ]; then
-    read -p "URL Server DaDude (es: http://dadude.tuodominio.it:8000): " SERVER_URL
+DEFAULT_SERVER_URL="http://dadude.domarc.it:8000"
+
+while [ -z "$SERVER_URL" ]; do
+    read -p "URL Server DaDude [$DEFAULT_SERVER_URL]: " SERVER_URL
+    SERVER_URL=${SERVER_URL:-$DEFAULT_SERVER_URL}
     if [ -z "$SERVER_URL" ]; then
-        echo -e "${RED}Errore: URL server è obbligatorio${NC}"
-        exit 1
+        echo -e "${YELLOW}⚠ URL server è obbligatorio, riprova${NC}"
     fi
-fi
+done
+echo -e "${GREEN}Server: $SERVER_URL${NC}"
 
 # === CONFIGURAZIONE AGENT ===
 echo -e "\n${BLUE}--- Identificazione Agent ---${NC}"
 
-if [ -z "$AGENT_NAME" ]; then
+while [ -z "$AGENT_NAME" ]; do
     read -p "Nome Agent (es: agent-sede-milano): " AGENT_NAME
     if [ -z "$AGENT_NAME" ]; then
-        echo -e "${RED}Errore: Nome agent è obbligatorio${NC}"
-        exit 1
+        echo -e "${YELLOW}⚠ Nome agent è obbligatorio, riprova${NC}"
     fi
-fi
+done
 
 if [ -z "$AGENT_TOKEN" ]; then
     read -p "Token Agent (lascia vuoto per generare automaticamente): " AGENT_TOKEN
@@ -197,22 +199,26 @@ if [ -z "$BRIDGE" ]; then
     done
     
     if [ ${#BRIDGE_OPTIONS[@]} -eq 0 ]; then
-        read -p "Nessun bridge trovato. Inserisci nome bridge: " BRIDGE
+        while [ -z "$BRIDGE" ]; do
+            read -p "Nessun bridge trovato. Inserisci nome bridge: " BRIDGE
+            if [ -z "$BRIDGE" ]; then
+                echo -e "${YELLOW}⚠ Bridge è obbligatorio, riprova${NC}"
+            fi
+        done
     elif [ ${#BRIDGE_OPTIONS[@]} -eq 1 ]; then
         BRIDGE="${BRIDGE_OPTIONS[1]}"
         echo -e "${GREEN}Selezionato automaticamente: $BRIDGE${NC}"
     else
-        read -p "Scegli bridge [1-$((i-1))]: " BRIDGE_CHOICE
-        if [ -n "$BRIDGE_CHOICE" ] && [ -n "${BRIDGE_OPTIONS[$BRIDGE_CHOICE]}" ]; then
-            BRIDGE="${BRIDGE_OPTIONS[$BRIDGE_CHOICE]}"
-        else
-            BRIDGE="${BRIDGE_OPTIONS[1]}"
-        fi
-    fi
-    
-    if [ -z "$BRIDGE" ]; then
-        echo -e "${RED}Errore: Bridge è obbligatorio${NC}"
-        exit 1
+        while [ -z "$BRIDGE" ]; do
+            read -p "Scegli bridge [1-$((i-1))]: " BRIDGE_CHOICE
+            if [ -n "$BRIDGE_CHOICE" ] && [ -n "${BRIDGE_OPTIONS[$BRIDGE_CHOICE]}" ]; then
+                BRIDGE="${BRIDGE_OPTIONS[$BRIDGE_CHOICE]}"
+            elif [ -z "$BRIDGE_CHOICE" ]; then
+                BRIDGE="${BRIDGE_OPTIONS[1]}"
+            else
+                echo -e "${YELLOW}⚠ Scelta non valida, riprova${NC}"
+            fi
+        done
     fi
     echo -e "${GREEN}Bridge selezionato: $BRIDGE${NC}"
 fi
@@ -266,26 +272,22 @@ else
         echo -e "${YELLOW}Rete rilevata: ${SUGGESTED_PREFIX}.0${SUGGESTED_MASK}${NC}"
     fi
 
-    if [ -z "$IP" ] || [ "$IP" == "dhcp" ]; then
+    while [ -z "$IP" ] || [ "$IP" == "dhcp" ]; do
         if [ -n "$SUGGESTED_PREFIX" ]; then
             read -p "IP/Netmask (es: ${SUGGESTED_PREFIX}.100${SUGGESTED_MASK:-/24}): " IP
         else
             read -p "IP/Netmask (es: 192.168.1.100/24): " IP
         fi
         if [ -z "$IP" ]; then
-            echo -e "${RED}Errore: IP è obbligatorio per modalità statica${NC}"
-            exit 1
+            echo -e "${YELLOW}⚠ IP è obbligatorio per modalità statica, riprova${NC}"
         fi
-    fi
+    done
 
     # Suggerisci gateway basandosi sull'IP inserito
-    SUGGESTED_GW=""
-    if [ -n "$IP" ]; then
-        IP_PREFIX=$(echo $IP | grep -oP '[\d.]+' | head -1 | sed 's/\.[0-9]*$//')
-        SUGGESTED_GW="${IP_PREFIX}.254"
-    fi
+    IP_PREFIX=$(echo $IP | grep -oP '[\d.]+' | head -1 | sed 's/\.[0-9]*$//')
+    SUGGESTED_GW="${IP_PREFIX}.254"
 
-    if [ -z "$GATEWAY" ]; then
+    while [ -z "$GATEWAY" ]; do
         if [ -n "$SUGGESTED_GW" ]; then
             read -p "Gateway [$SUGGESTED_GW]: " GATEWAY
             GATEWAY=${GATEWAY:-$SUGGESTED_GW}
@@ -293,20 +295,18 @@ else
             read -p "Gateway: " GATEWAY
         fi
         if [ -z "$GATEWAY" ]; then
-            echo -e "${RED}Errore: Gateway è obbligatorio${NC}"
-            exit 1
+            echo -e "${YELLOW}⚠ Gateway è obbligatorio, riprova${NC}"
         fi
-    fi
+    done
 
     # Suggerisci DNS = gateway (comune per reti aziendali)
-    if [ -z "$DNS" ]; then
+    while [ -z "$DNS" ]; do
         read -p "Server DNS [$GATEWAY]: " DNS
         DNS=${DNS:-$GATEWAY}
         if [ -z "$DNS" ]; then
-            echo -e "${RED}Errore: DNS è obbligatorio${NC}"
-            exit 1
+            echo -e "${YELLOW}⚠ DNS è obbligatorio, riprova${NC}"
         fi
-    fi
+    done
 fi
 
 # Genera agent ID univoco
