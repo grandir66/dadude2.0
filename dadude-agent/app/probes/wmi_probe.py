@@ -30,17 +30,22 @@ async def probe(
         from impacket.dcerpc.v5.dcomrt import DCOMConnection
         
         # Se domain è vuoto, usa "." per indicare credenziali locali
-        # Questo evita bug in impacket con domain vuoto/None
         effective_domain = domain if domain else "."
         
         logger.debug(f"WMI probe: connecting to {target} as {effective_domain}\\{username}")
         
+        # Impacket richiede bytes per username/password/domain
+        # Converti tutto in bytes UTF-8
+        username_bytes = username.encode('utf-8') if isinstance(username, str) else username
+        password_bytes = password.encode('utf-8') if isinstance(password, str) else password
+        domain_bytes = effective_domain.encode('utf-8') if isinstance(effective_domain, str) else effective_domain
+        
         # Connessione DCOM
         dcom = DCOMConnection(
             target,
-            username=username,
-            password=password,
-            domain=effective_domain
+            username=username_bytes,
+            password=password_bytes,
+            domain=domain_bytes
         )
         
         # Query WMI
