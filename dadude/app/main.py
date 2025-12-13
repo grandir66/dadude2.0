@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .config import get_settings
 from .services import get_dude_service, get_sync_service
+from .services.websocket_hub import get_websocket_hub
 from .routers import devices, probes, alerts, webhook, system, customers, import_export, dashboard, discovery, mikrotik, inventory, agents
 
 
@@ -62,7 +63,12 @@ async def lifespan(app: FastAPI):
     Path("./data").mkdir(exist_ok=True)
     Path("./logs").mkdir(exist_ok=True)
     
-    # Connetti a Dude Server
+    # Avvia WebSocket Hub per agent mTLS
+    ws_hub = get_websocket_hub()
+    await ws_hub.start()
+    logger.info("WebSocket Hub started for agent connections")
+    
+    # Connetti a Dude Server (opzionale)
     dude = get_dude_service()
     if dude.connect():
         logger.success(f"Connected to Dude Server at {settings.dude_host}")
@@ -82,6 +88,11 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down DaDude...")
+    
+    # Ferma WebSocket Hub
+    ws_hub = get_websocket_hub()
+    await ws_hub.stop()
+    logger.info("WebSocket Hub stopped")
     
     sync = get_sync_service()
     sync.stop()

@@ -38,11 +38,31 @@ class Settings(BaseSettings):
     agent_name: str = "DaDude Agent"
     agent_token: str = "change-me-in-production"
     
-    # Polling
+    # Polling / Connection
     poll_interval: int = 60  # seconds
+    heartbeat_interval: int = 30  # seconds
     
-    # API
+    # API (legacy HTTP mode)
     api_port: int = 8080
+    
+    # Connection mode: "websocket" (new) or "http" (legacy)
+    connection_mode: str = "websocket"
+    
+    # mTLS / Certificates
+    certs_dir: Optional[str] = None  # Directory certificati
+    
+    # Local storage
+    data_dir: Optional[str] = "/var/lib/dadude-agent"
+    
+    # SFTP Fallback
+    sftp_enabled: bool = False
+    sftp_host: str = ""
+    sftp_port: int = 22
+    sftp_username: str = ""
+    sftp_password: Optional[str] = None
+    sftp_private_key_path: Optional[str] = None
+    sftp_remote_path: str = "/incoming"
+    sftp_fallback_timeout_minutes: int = 30
     
     # Logging
     log_level: str = "INFO"

@@ -1019,3 +1019,380 @@ def _compare_versions(v1: str, v2: str) -> int:
             return 1
     return 0
 
+
+# ==========================================
+# PKI / CERTIFICATE ENROLLMENT (mTLS)
+# ==========================================
+
+class CertificateEnrollRequest(BaseModel):
+    """Richiesta enrollment certificato"""
+    agent_id: str
+    agent_name: str
+
+
+class CertificateRenewRequest(BaseModel):
+    """Richiesta rinnovo certificato"""
+    validity_days: int = 365
+
+
+@router.post("/enroll")
+async def enroll_agent_certificate(
+    data: CertificateEnrollRequest,
+    request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Enrollment certificato per mTLS.
+    
+    L'agent chiama questo endpoint per ottenere un certificato client
+    che userà per connettersi via WebSocket sicuro.
+    
+    Richiede che l'agent sia già registrato e approvato.
+    """
+    from ..services.pki_service import get_pki_service
+    from ..services.customer_service import get_customer_service
+    
+    service = get_customer_service()
+    pki = get_pki_service()
+    
+    # Verifica token
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid authorization")
+    
+    token = authorization[7:]
+    
+    # Trova agent e verifica token
+    try:
+        agent = service.get_agent_by_unique_id(data.agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        # Verifica che agent sia approvato
+        if not agent.active:
+            raise HTTPException(status_code=403, detail="Agent not approved yet")
+        
+        # Verifica token
+        encryption = get_encryption_service()
+        stored_token = encryption.decrypt(agent.agent_token) if agent.agent_token else None
+        
+        if stored_token != token:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error verifying agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    # Genera certificato
+    try:
+        cert_data = pki.generate_agent_certificate(
+            agent_id=data.agent_id,
+            agent_name=data.agent_name,
+            validity_days=365
+        )
+        
+        logger.success(f"Certificate issued for agent: {data.agent_id}")
+        
+        return {
+            "success": True,
+            "agent_id": data.agent_id,
+            "certificate": cert_data["certificate"].decode("utf-8"),
+            "private_key": cert_data["private_key"].decode("utf-8"),
+            "ca_certificate": cert_data["ca_certificate"].decode("utf-8"),
+            "expires_in_days": 365,
+        }
+        
+    except Exception as e:
+        logger.error(f"Certificate enrollment failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{agent_db_id}/certificate")
+async def get_agent_certificate(
+    agent_db_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Recupera certificato esistente per un agent.
+    """
+    from ..services.pki_service import get_pki_service
+    from ..services.customer_service import get_customer_service
+    
+    service = get_customer_service()
+    pki = get_pki_service()
+    
+    # Verifica autorizzazione
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing authorization")
+    
+    token = authorization[7:]
+    
+    # Trova agent
+    agent = service.get_agent(agent_db_id, include_password=True)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Verifica token
+    encryption = get_encryption_service()
+    stored_token = encryption.decrypt(agent.agent_token) if agent.agent_token else None
+    if stored_token != token:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    # Recupera certificato
+    cert_data = pki.get_agent_certificate(agent.name)  # Usa name come agent_id nel PKI
+    
+    if not cert_data:
+        raise HTTPException(status_code=404, detail="Certificate not found. Call /enroll first.")
+    
+    # Info certificato
+    cert_info = pki.get_certificate_info(agent.name)
+    
+    return {
+        "success": True,
+        "certificate": cert_data["certificate"].decode("utf-8"),
+        "ca_certificate": cert_data["ca_certificate"].decode("utf-8"),
+        "info": cert_info,
+        # Non restituiamo la chiave privata - già fornita all'enrollment
+    }
+
+
+@router.post("/{agent_db_id}/renew")
+async def renew_agent_certificate(
+    agent_db_id: str,
+    data: CertificateRenewRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Rinnova certificato agent.
+    """
+    from ..services.pki_service import get_pki_service
+    from ..services.customer_service import get_customer_service
+    
+    service = get_customer_service()
+    pki = get_pki_service()
+    
+    # Verifica autorizzazione
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing authorization")
+    
+    # Trova agent
+    agent = service.get_agent(agent_db_id, include_password=True)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Revoca vecchio certificato
+    pki.revoke_certificate(agent.name)
+    
+    # Genera nuovo certificato
+    cert_data = pki.generate_agent_certificate(
+        agent_id=agent.name,
+        agent_name=agent.name,
+        validity_days=data.validity_days
+    )
+    
+    logger.info(f"Certificate renewed for agent: {agent.name}")
+    
+    return {
+        "success": True,
+        "certificate": cert_data["certificate"].decode("utf-8"),
+        "private_key": cert_data["private_key"].decode("utf-8"),
+        "ca_certificate": cert_data["ca_certificate"].decode("utf-8"),
+        "expires_in_days": data.validity_days,
+    }
+
+
+@router.delete("/{agent_db_id}/certificate")
+async def revoke_agent_certificate(
+    agent_db_id: str,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Revoca certificato agent (admin only).
+    """
+    from ..services.pki_service import get_pki_service
+    from ..services.customer_service import get_customer_service
+    
+    # TODO: Verificare che sia admin
+    
+    service = get_customer_service()
+    pki = get_pki_service()
+    
+    agent = service.get_agent(agent_db_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    success = pki.revoke_certificate(agent.name)
+    
+    if success:
+        logger.warning(f"Certificate revoked for agent: {agent.name}")
+        return {"success": True, "message": f"Certificate revoked for {agent.name}"}
+    else:
+        return {"success": False, "message": "Certificate not found or already revoked"}
+
+
+@router.get("/pki/ca")
+async def get_ca_certificate():
+    """
+    Ottiene il certificato CA pubblico.
+    Utile per gli agent per verificare il server.
+    """
+    from ..services.pki_service import get_pki_service
+    
+    pki = get_pki_service()
+    ca_cert = pki.get_ca_certificate()
+    
+    return {
+        "success": True,
+        "ca_certificate": ca_cert.decode("utf-8"),
+    }
+
+
+@router.get("/pki/expiring")
+async def get_expiring_certificates(
+    days: int = Query(default=30, description="Giorni prima della scadenza"),
+):
+    """
+    Lista certificati in scadenza entro N giorni.
+    """
+    from ..services.pki_service import get_pki_service
+    
+    pki = get_pki_service()
+    expiring = pki.check_expiring_soon(days=days)
+    
+    return {
+        "days_threshold": days,
+        "count": len(expiring),
+        "certificates": expiring,
+    }
+
+
+# ==========================================
+# WEBSOCKET ENDPOINT
+# ==========================================
+
+from fastapi import WebSocket, WebSocketDisconnect
+
+
+@router.websocket("/ws/{agent_id}")
+async def websocket_agent_connection(
+    websocket: WebSocket,
+    agent_id: str,
+):
+    """
+    WebSocket endpoint per connessione agent bidirezionale.
+    
+    L'agent si connette qui dopo l'enrollment e mantiene la connessione
+    aperta per ricevere comandi e inviare risultati.
+    
+    Autenticazione via mTLS (certificato client) o token header.
+    """
+    from ..services.websocket_hub import get_websocket_hub
+    from ..services.customer_service import get_customer_service
+    
+    hub = get_websocket_hub()
+    service = get_customer_service()
+    
+    # Estrai token dall'header (fallback se mTLS non disponibile)
+    # In produzione, verificherebbe il certificato client
+    auth_header = websocket.headers.get("authorization", "")
+    token = None
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    
+    # Verifica che agent esista
+    try:
+        agent = service.get_agent_by_unique_id(agent_id)
+        if not agent:
+            await websocket.close(code=4004, reason="Agent not found")
+            return
+        
+        if not agent.active:
+            await websocket.close(code=4003, reason="Agent not approved")
+            return
+        
+        # Verifica token (se presente)
+        if token:
+            encryption = get_encryption_service()
+            stored_token = encryption.decrypt(agent.agent_token) if agent.agent_token else None
+            if stored_token != token:
+                await websocket.close(code=4001, reason="Invalid token")
+                return
+        
+    except Exception as e:
+        logger.error(f"WebSocket auth error for {agent_id}: {e}")
+        await websocket.close(code=4000, reason="Authentication failed")
+        return
+    
+    # Gestisci connessione
+    logger.info(f"WebSocket connection from agent: {agent_id}")
+    
+    try:
+        await hub.handle_connection(websocket, agent_id)
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected: {agent_id}")
+    except Exception as e:
+        logger.error(f"WebSocket error for {agent_id}: {e}")
+
+
+@router.get("/ws/connected")
+async def list_connected_agents():
+    """
+    Lista agent attualmente connessi via WebSocket.
+    """
+    from ..services.websocket_hub import get_websocket_hub
+    
+    hub = get_websocket_hub()
+    
+    return {
+        "count": hub.connected_count,
+        "agents": hub.get_connected_agents(),
+    }
+
+
+@router.post("/ws/{agent_id}/command")
+async def send_command_to_agent(
+    agent_id: str,
+    action: str = Query(..., description="Azione: scan_network, probe_wmi, probe_ssh, etc."),
+    params: Optional[str] = Query(None, description="Parametri JSON"),
+    timeout: float = Query(default=300.0, description="Timeout in secondi"),
+):
+    """
+    Invia comando a un agent connesso via WebSocket.
+    """
+    from ..services.websocket_hub import get_websocket_hub, CommandType
+    import json
+    
+    hub = get_websocket_hub()
+    
+    if not hub.is_connected(agent_id):
+        raise HTTPException(status_code=404, detail="Agent not connected")
+    
+    # Parse parametri
+    try:
+        command_params = json.loads(params) if params else {}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON in params")
+    
+    # Mappa azione a CommandType
+    try:
+        action_type = CommandType(action)
+    except ValueError:
+        # Accetta anche azioni custom
+        action_type = action
+    
+    # Invia comando
+    result = await hub.send_command(
+        agent_id=agent_id,
+        action=action_type,
+        params=command_params,
+        timeout=timeout
+    )
+    
+    return {
+        "command_id": result.command_id,
+        "status": result.status,
+        "data": result.data,
+        "error": result.error,
+    }
+
