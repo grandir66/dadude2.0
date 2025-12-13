@@ -261,37 +261,154 @@ class DeviceProbeService:
                 stdin, stdout, stderr = client.exec_command("hostname", timeout=5)
                 info["hostname"] = stdout.read().decode().strip()
                 
-                # Try to identify OS
+                # Get kernel/uname first to detect device type
+                stdin, stdout, stderr = client.exec_command("uname -a", timeout=5)
+                uname_all = stdout.read().decode().strip().lower()
+                info["uname"] = uname_all
+                
+                # Try to identify OS - check multiple sources
                 stdin, stdout, stderr = client.exec_command("cat /etc/os-release 2>/dev/null || cat /etc/redhat-release 2>/dev/null", timeout=5)
                 os_info = stdout.read().decode()
                 
-                if "Ubuntu" in os_info:
-                    info["os_family"] = "Ubuntu"
-                    info["device_type"] = "linux"
-                elif "Debian" in os_info:
-                    info["os_family"] = "Debian"
-                    info["device_type"] = "linux"
-                elif "CentOS" in os_info or "Red Hat" in os_info:
-                    info["os_family"] = "RHEL"
-                    info["device_type"] = "linux"
-                elif "Alpine" in os_info:
-                    info["os_family"] = "Alpine"
-                    info["device_type"] = "linux"
-                elif "Proxmox" in os_info:
-                    info["os_family"] = "Proxmox"
-                    info["device_type"] = "linux"
-                    info["category"] = "hypervisor"
-                else:
-                    # Check if RouterOS via SSH
+                # ==== DEVICE TYPE DETECTION ====
+                device_detected = False
+                
+                # 1. Check for MikroTik RouterOS
+                if not device_detected:
                     stdin, stdout, stderr = client.exec_command("/system resource print", timeout=5)
                     ros_out = stdout.read().decode()
-                    if "routeros" in ros_out.lower() or "uptime" in ros_out.lower():
+                    if "routeros" in ros_out.lower() or "uptime:" in ros_out.lower():
                         info["os_family"] = "RouterOS"
                         info["device_type"] = "mikrotik"
                         info["category"] = "router"
+                        device_detected = True
+                        # Extract RouterOS specific info
+                        for line in ros_out.split('\n'):
+                            if 'version:' in line.lower():
+                                info["os_version"] = line.split(':', 1)[1].strip()
+                            elif 'board-name:' in line.lower():
+                                info["model"] = line.split(':', 1)[1].strip()
+                            elif 'cpu:' in line.lower():
+                                info["cpu_model"] = line.split(':', 1)[1].strip()
+                            elif 'cpu-count:' in line.lower():
+                                try:
+                                    info["cpu_cores"] = int(line.split(':', 1)[1].strip())
+                                except:
+                                    pass
+                            elif 'total-memory:' in line.lower():
+                                try:
+                                    mem_str = line.split(':', 1)[1].strip()
+                                    if 'MiB' in mem_str:
+                                        info["memory_total_mb"] = int(float(mem_str.replace('MiB', '')))
+                                    elif 'GiB' in mem_str:
+                                        info["memory_total_mb"] = int(float(mem_str.replace('GiB', '')) * 1024)
+                                except:
+                                    pass
+                
+                # 2. Check for Ubiquiti UniFi/EdgeOS
+                if not device_detected:
+                    stdin, stdout, stderr = client.exec_command("cat /etc/board.info 2>/dev/null || mca-cli-op info 2>/dev/null", timeout=5)
+                    ubnt_out = stdout.read().decode()
+                    if ubnt_out and ('ubnt' in ubnt_out.lower() or 'ubiquiti' in ubnt_out.lower() or 'board.' in ubnt_out.lower()):
+                        info["os_family"] = "UniFi"
+                        info["device_type"] = "network"
+                        info["category"] = "ap" if 'uap' in uname_all or 'u6' in uname_all or 'u7' in uname_all else "switch"
+                        info["manufacturer"] = "Ubiquiti"
+                        device_detected = True
+                        for line in ubnt_out.split('\n'):
+                            if 'board.name' in line.lower() or 'model' in line.lower():
+                                info["model"] = line.split('=')[-1].strip() if '=' in line else line.split(':')[-1].strip()
+                            elif 'board.sysid' in line.lower() or 'serialno' in line.lower():
+                                info["serial_number"] = line.split('=')[-1].strip() if '=' in line else line.split(':')[-1].strip()
+                
+                # 3. Check for Synology DSM
+                if not device_detected:
+                    stdin, stdout, stderr = client.exec_command("cat /etc/synoinfo.conf 2>/dev/null", timeout=5)
+                    syno_out = stdout.read().decode()
+                    if syno_out and 'synology' in syno_out.lower():
+                        info["os_family"] = "DSM"
+                        info["device_type"] = "nas"
+                        info["category"] = "storage"
+                        info["manufacturer"] = "Synology"
+                        device_detected = True
+                        for line in syno_out.split('\n'):
+                            if 'upnpmodelname' in line.lower():
+                                info["model"] = line.split('=')[-1].strip().strip('"')
+                            elif 'unique' in line.lower():
+                                info["serial_number"] = line.split('=')[-1].strip().strip('"')
+                        # Get DSM version
+                        stdin, stdout, stderr = client.exec_command("cat /etc.defaults/VERSION 2>/dev/null", timeout=5)
+                        ver_out = stdout.read().decode()
+                        for line in ver_out.split('\n'):
+                            if 'productversion' in line.lower():
+                                info["os_version"] = line.split('=')[-1].strip().strip('"')
+                
+                # 4. Check for QNAP QTS
+                if not device_detected:
+                    stdin, stdout, stderr = client.exec_command("getsysinfo model 2>/dev/null || cat /etc/config/qpkg.conf 2>/dev/null", timeout=5)
+                    qnap_out = stdout.read().decode()
+                    if qnap_out and ('qnap' in qnap_out.lower() or 'qts' in os_info.lower()):
+                        info["os_family"] = "QTS"
+                        info["device_type"] = "nas"
+                        info["category"] = "storage"
+                        info["manufacturer"] = "QNAP"
+                        device_detected = True
+                        info["model"] = qnap_out.strip().split('\n')[0] if qnap_out else None
+                
+                # 5. Check for VMware ESXi
+                if not device_detected and 'vmkernel' in uname_all:
+                    info["os_family"] = "ESXi"
+                    info["device_type"] = "hypervisor"
+                    info["category"] = "hypervisor"
+                    info["manufacturer"] = "VMware"
+                    device_detected = True
+                    stdin, stdout, stderr = client.exec_command("vmware -v 2>/dev/null", timeout=5)
+                    ver_out = stdout.read().decode().strip()
+                    if ver_out:
+                        info["os_version"] = ver_out
+                
+                # 6. Standard Linux detection
+                if not device_detected:
+                    if "Ubuntu" in os_info:
+                        info["os_family"] = "Ubuntu"
+                        info["device_type"] = "linux"
+                    elif "Debian" in os_info:
+                        info["os_family"] = "Debian"
+                        info["device_type"] = "linux"
+                    elif "CentOS" in os_info or "Red Hat" in os_info or "Rocky" in os_info or "AlmaLinux" in os_info:
+                        info["os_family"] = "RHEL"
+                        info["device_type"] = "linux"
+                    elif "Alpine" in os_info:
+                        info["os_family"] = "Alpine"
+                        info["device_type"] = "linux"
+                    elif "Proxmox" in os_info:
+                        info["os_family"] = "Proxmox"
+                        info["device_type"] = "linux"
+                        info["category"] = "hypervisor"
+                        # Get Proxmox version
+                        stdin, stdout, stderr = client.exec_command("pveversion 2>/dev/null", timeout=5)
+                        pve_out = stdout.read().decode().strip()
+                        if pve_out:
+                            info["os_version"] = pve_out
+                    elif "SUSE" in os_info or "openSUSE" in os_info:
+                        info["os_family"] = "SUSE"
+                        info["device_type"] = "linux"
+                    elif "Arch" in os_info:
+                        info["os_family"] = "Arch"
+                        info["device_type"] = "linux"
+                    elif "FreeBSD" in os_info or "freebsd" in uname_all:
+                        info["os_family"] = "FreeBSD"
+                        info["device_type"] = "bsd"
                     else:
                         info["os_family"] = "Linux"
                         info["device_type"] = "linux"
+                    
+                    # Extract version from os-release
+                    for line in os_info.split('\n'):
+                        if line.startswith('VERSION_ID='):
+                            info["os_version"] = line.split('=')[1].strip().strip('"')
+                        elif line.startswith('PRETTY_NAME='):
+                            info["os_pretty_name"] = line.split('=')[1].strip().strip('"')
                 
                 # Get kernel version
                 stdin, stdout, stderr = client.exec_command("uname -r", timeout=5)
@@ -301,33 +418,87 @@ class DeviceProbeService:
                 stdin, stdout, stderr = client.exec_command("uname -m", timeout=5)
                 info["arch"] = stdout.read().decode().strip()
                 
-                # Get Memory
-                try:
-                    stdin, stdout, stderr = client.exec_command("free -m | grep Mem | awk '{print $2}'", timeout=5)
-                    mem_out = stdout.read().decode().strip()
-                    if mem_out.isdigit():
-                         info["memory_total_mb"] = int(mem_out)
-                except:
-                    pass
+                # ==== HARDWARE INFO (for Linux/BSD) ====
+                if info.get("device_type") in ["linux", "bsd", "hypervisor"]:
+                    # Get Memory
+                    try:
+                        stdin, stdout, stderr = client.exec_command("free -m | grep Mem | awk '{print $2}'", timeout=5)
+                        mem_out = stdout.read().decode().strip()
+                        if mem_out.isdigit():
+                            info["memory_total_mb"] = int(mem_out)
+                    except:
+                        pass
 
-                # Get CPU Cores
-                try:
-                    stdin, stdout, stderr = client.exec_command("nproc", timeout=5)
-                    cpu_out = stdout.read().decode().strip()
-                    if cpu_out.isdigit():
-                        info["cpu_cores"] = int(cpu_out)
-                except:
-                    pass
-                
-                # Get Disk
-                try:
-                    stdin, stdout, stderr = client.exec_command("df -BG / | awk 'NR==2 {print $2, $4}'", timeout=5)
-                    disk_out = stdout.read().decode().strip().split()
-                    if len(disk_out) == 2:
-                        info["disk_total_gb"] = int(disk_out[0].replace('G', ''))
-                        info["disk_free_gb"] = int(disk_out[1].replace('G', ''))
-                except:
-                    pass
+                    # Get CPU Info
+                    try:
+                        stdin, stdout, stderr = client.exec_command("nproc", timeout=5)
+                        cpu_out = stdout.read().decode().strip()
+                        if cpu_out.isdigit():
+                            info["cpu_cores"] = int(cpu_out)
+                    except:
+                        pass
+                    
+                    try:
+                        stdin, stdout, stderr = client.exec_command("cat /proc/cpuinfo | grep 'model name' | head -1 | cut -d':' -f2", timeout=5)
+                        cpu_model = stdout.read().decode().strip()
+                        if cpu_model:
+                            info["cpu_model"] = cpu_model
+                    except:
+                        pass
+                    
+                    # Get Disk
+                    try:
+                        stdin, stdout, stderr = client.exec_command("df -BG / | awk 'NR==2 {print $2, $4}'", timeout=5)
+                        disk_out = stdout.read().decode().strip().split()
+                        if len(disk_out) == 2:
+                            info["disk_total_gb"] = int(disk_out[0].replace('G', ''))
+                            info["disk_free_gb"] = int(disk_out[1].replace('G', ''))
+                    except:
+                        pass
+                    
+                    # Get Serial Number (DMI)
+                    try:
+                        stdin, stdout, stderr = client.exec_command("cat /sys/class/dmi/id/product_serial 2>/dev/null || dmidecode -s system-serial-number 2>/dev/null", timeout=5)
+                        serial = stdout.read().decode().strip()
+                        if serial and serial != "To Be Filled By O.E.M." and serial != "Not Specified":
+                            info["serial_number"] = serial
+                    except:
+                        pass
+                    
+                    # Get Manufacturer/Model (DMI)
+                    try:
+                        stdin, stdout, stderr = client.exec_command("cat /sys/class/dmi/id/sys_vendor 2>/dev/null || dmidecode -s system-manufacturer 2>/dev/null", timeout=5)
+                        vendor = stdout.read().decode().strip()
+                        if vendor and vendor != "To Be Filled By O.E.M.":
+                            info["manufacturer"] = vendor
+                    except:
+                        pass
+                    
+                    try:
+                        stdin, stdout, stderr = client.exec_command("cat /sys/class/dmi/id/product_name 2>/dev/null || dmidecode -s system-product-name 2>/dev/null", timeout=5)
+                        model = stdout.read().decode().strip()
+                        if model and model != "To Be Filled By O.E.M.":
+                            info["model"] = model
+                    except:
+                        pass
+                    
+                    # Get Uptime
+                    try:
+                        stdin, stdout, stderr = client.exec_command("uptime -s 2>/dev/null || uptime", timeout=5)
+                        uptime_out = stdout.read().decode().strip()
+                        info["uptime"] = uptime_out
+                    except:
+                        pass
+                    
+                    # Check if Docker is installed
+                    try:
+                        stdin, stdout, stderr = client.exec_command("docker --version 2>/dev/null", timeout=5)
+                        docker_out = stdout.read().decode().strip()
+                        if docker_out:
+                            info["docker_installed"] = True
+                            info["docker_version"] = docker_out.split(',')[0].replace('Docker version', '').strip()
+                    except:
+                        pass
 
                 client.close()
                 return info
@@ -862,29 +1033,139 @@ class DeviceProbeService:
                 except Exception as e:
                     logger.warning(f"WMI Win32_Processor query failed: {type(e).__name__}: {e}")
 
-                # Get Disk Info (C:)
+                # Get Disk Info (all fixed drives)
                 logger.debug(f"WMI: Querying Win32_LogicalDisk...")
                 try:
-                    result = iWbemServices.ExecQuery("SELECT Size, FreeSpace FROM Win32_LogicalDisk WHERE DeviceID='C:'")
-                    item = result.Next(0xffffffff, 1)[0]
-                    props = item.getProperties()
-                    size_val = get_prop_value(props, "Size")
-                    free_val = get_prop_value(props, "FreeSpace")
-                    if size_val:
+                    result = iWbemServices.ExecQuery("SELECT DeviceID, Size, FreeSpace, FileSystem FROM Win32_LogicalDisk WHERE DriveType=3")
+                    disks = []
+                    total_size = 0
+                    total_free = 0
+                    while True:
                         try:
-                            os_info["disk_total_gb"] = int(size_val) // (1024**3)
-                        except (ValueError, TypeError):
-                            pass
-                    if free_val:
-                        try:
-                            os_info["disk_free_gb"] = int(free_val) // (1024**3)
-                        except (ValueError, TypeError):
-                            pass
-                    logger.debug(f"WMI Disk: {os_info.get('disk_total_gb')}GB total, {os_info.get('disk_free_gb')}GB free")
+                            item = result.Next(0xffffffff, 1)[0]
+                            props = item.getProperties()
+                            disk_info = {
+                                "device_id": str(get_prop_value(props, "DeviceID")),
+                                "filesystem": str(get_prop_value(props, "FileSystem")),
+                            }
+                            size_val = get_prop_value(props, "Size")
+                            free_val = get_prop_value(props, "FreeSpace")
+                            if size_val:
+                                disk_info["size_gb"] = int(size_val) // (1024**3)
+                                total_size += disk_info["size_gb"]
+                            if free_val:
+                                disk_info["free_gb"] = int(free_val) // (1024**3)
+                                total_free += disk_info["free_gb"]
+                            disks.append(disk_info)
+                        except:
+                            break
+                    os_info["disks"] = disks
+                    os_info["disk_total_gb"] = total_size
+                    os_info["disk_free_gb"] = total_free
+                    logger.debug(f"WMI Disks: {len(disks)} drives, {total_size}GB total, {total_free}GB free")
                 except Exception as e:
                     logger.warning(f"WMI Win32_LogicalDisk query failed: {type(e).__name__}: {e}")
+                
+                # Get BIOS Serial
+                logger.debug(f"WMI: Querying Win32_BIOS...")
+                try:
+                    result = iWbemServices.ExecQuery("SELECT SerialNumber, SMBIOSBIOSVersion FROM Win32_BIOS")
+                    item = result.Next(0xffffffff, 1)[0]
+                    props = item.getProperties()
+                    bios_serial = str(get_prop_value(props, "SerialNumber"))
+                    bios_version = str(get_prop_value(props, "SMBIOSBIOSVersion"))
+                    if bios_serial and bios_serial != "To Be Filled By O.E.M.":
+                        os_info["bios_serial"] = bios_serial
+                    if bios_version:
+                        os_info["bios_version"] = bios_version
+                except Exception as e:
+                    logger.debug(f"WMI Win32_BIOS query failed: {e}")
+                
+                # Get Network Adapters
+                logger.debug(f"WMI: Querying Win32_NetworkAdapterConfiguration...")
+                try:
+                    result = iWbemServices.ExecQuery("SELECT Description, MACAddress, IPAddress FROM Win32_NetworkAdapterConfiguration WHERE IPEnabled=True")
+                    nics = []
+                    while True:
+                        try:
+                            item = result.Next(0xffffffff, 1)[0]
+                            props = item.getProperties()
+                            nic_info = {
+                                "description": str(get_prop_value(props, "Description")),
+                                "mac": str(get_prop_value(props, "MACAddress")),
+                            }
+                            ip_val = get_prop_value(props, "IPAddress")
+                            if ip_val:
+                                nic_info["ips"] = list(ip_val) if hasattr(ip_val, '__iter__') and not isinstance(ip_val, str) else [str(ip_val)]
+                            nics.append(nic_info)
+                        except:
+                            break
+                    os_info["network_adapters"] = nics
+                    logger.debug(f"WMI NICs: {len(nics)} adapters found")
+                except Exception as e:
+                    logger.debug(f"WMI NetworkAdapterConfiguration query failed: {e}")
+                
+                # Get Last Boot Time
+                logger.debug(f"WMI: Querying Win32_OperatingSystem LastBootUpTime...")
+                try:
+                    result = iWbemServices.ExecQuery("SELECT LastBootUpTime FROM Win32_OperatingSystem")
+                    item = result.Next(0xffffffff, 1)[0]
+                    props = item.getProperties()
+                    boot_time = str(get_prop_value(props, "LastBootUpTime"))
+                    if boot_time:
+                        os_info["last_boot"] = boot_time
+                except Exception as e:
+                    logger.debug(f"WMI LastBootUpTime query failed: {e}")
+                
+                # Get Installed Software (top 20)
+                logger.debug(f"WMI: Querying Win32_Product (limited)...")
+                try:
+                    result = iWbemServices.ExecQuery("SELECT Name, Version, Vendor FROM Win32_Product")
+                    software = []
+                    count = 0
+                    while count < 20:
+                        try:
+                            item = result.Next(0xffffffff, 1)[0]
+                            props = item.getProperties()
+                            sw = {
+                                "name": str(get_prop_value(props, "Name")),
+                                "version": str(get_prop_value(props, "Version")),
+                                "vendor": str(get_prop_value(props, "Vendor")),
+                            }
+                            if sw["name"]:
+                                software.append(sw)
+                            count += 1
+                        except:
+                            break
+                    os_info["installed_software"] = software
+                    logger.debug(f"WMI Software: {len(software)} products found")
+                except Exception as e:
+                    logger.debug(f"WMI Win32_Product query failed: {e}")
+                
+                # Detect Server Roles
+                if "server" in os_info.get("name", "").lower():
+                    logger.debug(f"WMI: Querying Win32_ServerFeature...")
+                    try:
+                        result = iWbemServices.ExecQuery("SELECT Name FROM Win32_ServerFeature WHERE ParentID=0")
+                        roles = []
+                        while True:
+                            try:
+                                item = result.Next(0xffffffff, 1)[0]
+                                props = item.getProperties()
+                                role = str(get_prop_value(props, "Name"))
+                                if role:
+                                    roles.append(role)
+                            except:
+                                break
+                        os_info["server_roles"] = roles
+                        # Detect if DC
+                        if any("Active Directory" in r or "Domain Controller" in r for r in roles):
+                            os_info["is_domain_controller"] = True
+                        logger.debug(f"WMI Server Roles: {roles}")
+                    except Exception as e:
+                        logger.debug(f"WMI ServerFeature query failed: {e}")
 
-                logger.info(f"WMI collected data: {list(os_info.keys())} = {os_info}")
+                logger.info(f"WMI collected data: {list(os_info.keys())}")
                 dcom.disconnect()
                 return os_info
             
@@ -1690,3 +1971,4 @@ def get_device_probe_service() -> DeviceProbeService:
     if _device_probe_service is None:
         _device_probe_service = DeviceProbeService()
     return _device_probe_service
+
