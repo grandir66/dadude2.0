@@ -263,12 +263,17 @@ class CommandHandler:
             )
         
         try:
+            logger.info(f"WMI probe: target={target}, user={domain}\\{username if domain else username}")
             # wmi_probe.probe è già async, chiamalo direttamente
             result = await self._wmi_probe.probe(
                 target, username, password, domain
             )
+            logger.info(f"WMI probe result: {len(result) if result else 0} fields")
             return CommandResult(success=True, status="success", data=result)
         except Exception as e:
+            import traceback
+            logger.error(f"WMI probe error: {e}")
+            logger.error(traceback.format_exc())
             return CommandResult(success=False, status="error", error=str(e))
     
     async def _probe_ssh(self, params: Dict) -> CommandResult:
