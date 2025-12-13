@@ -545,9 +545,23 @@ services:
     container_name: dadude-agent-ws
     restart: unless-stopped
     env_file: .env
+    
+    # Network host per accedere alla rete locale e vedere i MAC address
+    network_mode: host
+    
+    # Capability per ARP scan (richiesto per ottenere MAC address)
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    
     volumes:
       - ./data:/var/lib/dadude-agent
+      # Per auto-update
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/opt/dadude-agent
+    
     command: ["python", "-m", "app.agent"]
+    
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 60s
