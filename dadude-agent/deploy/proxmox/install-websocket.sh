@@ -3,6 +3,8 @@
 # DaDude Agent v2.0 - Installazione WebSocket mTLS
 # Installa agent in modalità WebSocket (agent-initiated)
 #
+# Tutti i parametri vengono chiesti interattivamente se non forniti
+#
 
 set -e
 
@@ -20,23 +22,23 @@ echo "║  Modalità: Agent-Initiated (no porte in ascolto)         ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
-# Parametri di default
+# Parametri (tutti vuoti di default)
 CTID=""
-HOSTNAME="dadude-agent-ws"
-STORAGE="local-lvm"
+HOSTNAME=""
+STORAGE=""
 TEMPLATE_STORAGE="local"
-MEMORY=512
-DISK=4
-BRIDGE="vmbr0"
+MEMORY=""
+DISK=""
+BRIDGE=""
 VLAN=""
 IP=""
 GATEWAY=""
-DNS="8.8.8.8"
-SERVER_URL="http://dadude.domarc.it:8000"
+DNS=""
+SERVER_URL=""
 AGENT_NAME=""
 AGENT_TOKEN=""
 
-# Parse argomenti
+# Parse argomenti da linea di comando (opzionale)
 while [[ $# -gt 0 ]]; do
     case $1 in
         --ctid) CTID="$2"; shift 2 ;;
@@ -55,98 +57,186 @@ while [[ $# -gt 0 ]]; do
         --help)
             echo "Uso: $0 [opzioni]"
             echo ""
+            echo "Se non vengono forniti parametri, lo script li chiederà interattivamente."
+            echo ""
             echo "Opzioni:"
-            echo "  --ctid ID          ID container (auto se non specificato)"
-            echo "  --hostname NAME    Hostname container"
-            echo "  --server-url URL   URL server DaDude (es: http://192.168.4.45:8000)"
-            echo "  --agent-name NAME  Nome agent"
-            echo "  --agent-token TOK  Token agent (opzionale, auto-generato)"
-            echo "  --bridge BRIDGE    Bridge di rete (default: vmbr0)"
-            echo "  --vlan ID          VLAN tag (opzionale)"
-            echo "  --ip IP/MASK       IP statico (es: 192.168.1.100/24)"
-            echo "  --gateway IP       Gateway"
-            echo "  --dns IP           DNS server"
+            echo "  --ctid ID            ID container LXC"
+            echo "  --hostname NAME      Hostname del container"
+            echo "  --server-url URL     URL server DaDude (es: http://dadude.esempio.it:8000)"
+            echo "  --agent-name NAME    Nome identificativo dell'agent"
+            echo "  --agent-token TOK    Token agent (opzionale, auto-generato se vuoto)"
+            echo "  --bridge BRIDGE      Bridge di rete (es: vmbr0)"
+            echo "  --vlan ID            VLAN tag (opzionale, lascia vuoto se non usi VLAN)"
+            echo "  --ip IP/MASK         IP statico con netmask (es: 192.168.1.100/24)"
+            echo "  --gateway IP         Gateway di rete"
+            echo "  --dns IP             Server DNS"
+            echo "  --storage NAME       Storage per il container (default: local-lvm)"
+            echo "  --memory MB          Memoria RAM in MB (default: 512)"
+            echo "  --disk GB            Spazio disco in GB (default: 4)"
             exit 0
             ;;
-        *) echo "Opzione sconosciuta: $1"; exit 1 ;;
+        *) echo -e "${RED}Opzione sconosciuta: $1${NC}"; exit 1 ;;
     esac
 done
 
-# Interattivo se mancano parametri
-if [ "$SERVER_URL" = "http://dadude.domarc.it:8000" ]; then
-    read -p "URL Server DaDude [http://dadude.domarc.it:8000]: " input_url
-    SERVER_URL=${input_url:-http://dadude.domarc.it:8000}
+echo -e "${YELLOW}Configurazione Agent DaDude${NC}"
+echo "Inserisci i parametri richiesti (premi Invio per accettare i default tra parentesi)"
+echo ""
+
+# === CONFIGURAZIONE SERVER ===
+echo -e "${BLUE}--- Server DaDude ---${NC}"
+
+if [ -z "$SERVER_URL" ]; then
+    read -p "URL Server DaDude (es: http://dadude.tuodominio.it:8000): " SERVER_URL
+    if [ -z "$SERVER_URL" ]; then
+        echo -e "${RED}Errore: URL server è obbligatorio${NC}"
+        exit 1
+    fi
 fi
+
+# === CONFIGURAZIONE AGENT ===
+echo -e "\n${BLUE}--- Identificazione Agent ---${NC}"
 
 if [ -z "$AGENT_NAME" ]; then
-    read -p "Nome Agent: " AGENT_NAME
+    read -p "Nome Agent (es: agent-sede-milano): " AGENT_NAME
+    if [ -z "$AGENT_NAME" ]; then
+        echo -e "${RED}Errore: Nome agent è obbligatorio${NC}"
+        exit 1
+    fi
 fi
 
+if [ -z "$AGENT_TOKEN" ]; then
+    read -p "Token Agent (lascia vuoto per generare automaticamente): " AGENT_TOKEN
+    if [ -z "$AGENT_TOKEN" ]; then
+        AGENT_TOKEN=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
+        echo -e "${GREEN}Token generato: ${AGENT_TOKEN}${NC}"
+    fi
+fi
+
+# === CONFIGURAZIONE CONTAINER ===
+echo -e "\n${BLUE}--- Container LXC ---${NC}"
+
+if [ -z "$CTID" ]; then
+    SUGGESTED_CTID=$(pvesh get /cluster/nextid 2>/dev/null || echo "100")
+    read -p "ID Container [$SUGGESTED_CTID]: " CTID
+    CTID=${CTID:-$SUGGESTED_CTID}
+fi
+
+if [ -z "$HOSTNAME" ]; then
+    SUGGESTED_HOSTNAME="dadude-agent-${AGENT_NAME}"
+    read -p "Hostname container [$SUGGESTED_HOSTNAME]: " HOSTNAME
+    HOSTNAME=${HOSTNAME:-$SUGGESTED_HOSTNAME}
+fi
+
+if [ -z "$STORAGE" ]; then
+    read -p "Storage LXC [local-lvm]: " STORAGE
+    STORAGE=${STORAGE:-local-lvm}
+fi
+
+if [ -z "$MEMORY" ]; then
+    read -p "Memoria RAM in MB [512]: " MEMORY
+    MEMORY=${MEMORY:-512}
+fi
+
+if [ -z "$DISK" ]; then
+    read -p "Disco in GB [4]: " DISK
+    DISK=${DISK:-4}
+fi
+
+# === CONFIGURAZIONE RETE ===
+echo -e "\n${BLUE}--- Configurazione Rete ---${NC}"
+
 if [ -z "$BRIDGE" ]; then
-    read -p "Bridge di rete [vmbr0]: " BRIDGE
-    BRIDGE=${BRIDGE:-vmbr0}
+    read -p "Bridge di rete (es: vmbr0): " BRIDGE
+    if [ -z "$BRIDGE" ]; then
+        echo -e "${RED}Errore: Bridge è obbligatorio${NC}"
+        exit 1
+    fi
 fi
 
 if [ -z "$VLAN" ]; then
-    read -p "VLAN tag (vuoto se nessuna): " VLAN
+    read -p "VLAN tag (lascia vuoto se non usi VLAN): " VLAN
 fi
 
 if [ -z "$IP" ]; then
-    read -p "IP/MASK (es: 192.168.99.20/24): " IP
+    read -p "IP/Netmask (es: 192.168.1.100/24): " IP
+    if [ -z "$IP" ]; then
+        echo -e "${RED}Errore: IP è obbligatorio${NC}"
+        exit 1
+    fi
 fi
 
 if [ -z "$GATEWAY" ]; then
     read -p "Gateway: " GATEWAY
+    if [ -z "$GATEWAY" ]; then
+        echo -e "${RED}Errore: Gateway è obbligatorio${NC}"
+        exit 1
+    fi
 fi
 
 if [ -z "$DNS" ]; then
-    read -p "DNS [8.8.8.8]: " DNS
-    DNS=${DNS:-8.8.8.8}
+    read -p "Server DNS: " DNS
+    if [ -z "$DNS" ]; then
+        echo -e "${RED}Errore: DNS è obbligatorio${NC}"
+        exit 1
+    fi
 fi
 
-# Genera token se non fornito
-if [ -z "$AGENT_TOKEN" ]; then
-    AGENT_TOKEN=$(openssl rand -base64 32 | tr -d '/+=' | head -c 32)
-    echo -e "${YELLOW}Token generato: ${AGENT_TOKEN}${NC}"
-fi
-
-# Trova CTID libero
-if [ -z "$CTID" ]; then
-    CTID=$(pvesh get /cluster/nextid)
-fi
-
-# Genera agent ID
-AGENT_ID="agent-ws-${AGENT_NAME}-$(date +%s | tail -c 5)"
+# Genera agent ID univoco
+AGENT_ID="agent-${AGENT_NAME}-$(date +%s | tail -c 5)"
 
 # Elimina container esistente se presente
 if pct status $CTID &>/dev/null; then
-    echo -e "${YELLOW}Container $CTID esiste già. Lo elimino...${NC}"
+    echo -e "\n${YELLOW}Container $CTID esiste già. Lo elimino...${NC}"
     pct stop $CTID 2>/dev/null || true
     sleep 2
     pct destroy $CTID --force 2>/dev/null || true
     echo -e "${GREEN}Container $CTID eliminato${NC}"
 fi
 
+# Riepilogo configurazione
 echo ""
-echo -e "${GREEN}Configurazione:${NC}"
-echo "  CTID:        $CTID"
-echo "  Hostname:    $HOSTNAME"
-echo "  Agent ID:    $AGENT_ID"
-echo "  Agent Name:  $AGENT_NAME"
-echo "  Server URL:  $SERVER_URL"
-echo "  Network:     $BRIDGE${VLAN:+ (VLAN $VLAN)}"
-echo "  IP:          $IP"
-echo "  Gateway:     $GATEWAY"
-echo "  DNS:         $DNS"
-echo "  Mode:        WebSocket mTLS (v2.0)"
+echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}"
+echo -e "${GREEN}                    RIEPILOGO CONFIGURAZIONE              ${NC}"
+echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}"
+echo ""
+echo -e "  ${BLUE}Server:${NC}"
+echo "    URL Server:    $SERVER_URL"
+echo ""
+echo -e "  ${BLUE}Agent:${NC}"
+echo "    Nome:          $AGENT_NAME"
+echo "    Agent ID:      $AGENT_ID"
+echo "    Token:         ${AGENT_TOKEN:0:8}..."
+echo ""
+echo -e "  ${BLUE}Container:${NC}"
+echo "    CTID:          $CTID"
+echo "    Hostname:      $HOSTNAME"
+echo "    Storage:       $STORAGE"
+echo "    Memoria:       ${MEMORY}MB"
+echo "    Disco:         ${DISK}GB"
+echo ""
+echo -e "  ${BLUE}Rete:${NC}"
+echo "    Bridge:        $BRIDGE"
+if [ -n "$VLAN" ]; then
+echo "    VLAN:          $VLAN"
+fi
+echo "    IP:            $IP"
+echo "    Gateway:       $GATEWAY"
+echo "    DNS:           $DNS"
+echo ""
+echo -e "  ${BLUE}Modalità:${NC}          WebSocket mTLS (agent-initiated)"
+echo ""
+echo -e "${GREEN}══════════════════════════════════════════════════════════${NC}"
 echo ""
 
 read -p "Procedere con l'installazione? [y/N] " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Annullato."
+    echo "Installazione annullata."
     exit 1
 fi
+
+# === INSTALLAZIONE ===
 
 # Trova template
 echo -e "\n${BLUE}[1/6] Verifico template...${NC}"
@@ -179,9 +269,7 @@ NET_CONFIG="name=eth0,bridge=${BRIDGE}"
 if [ -n "$VLAN" ]; then
     NET_CONFIG="${NET_CONFIG},tag=${VLAN}"
 fi
-if [ -n "$IP" ]; then
-    NET_CONFIG="${NET_CONFIG},ip=${IP},gw=${GATEWAY}"
-fi
+NET_CONFIG="${NET_CONFIG},ip=${IP},gw=${GATEWAY}"
 
 # Crea container
 echo -e "\n${BLUE}[2/6] Creo container LXC...${NC}"
@@ -191,6 +279,7 @@ pct create $CTID $TEMPLATE \
     --storage $STORAGE \
     --memory $MEMORY \
     --cores 1 \
+    --rootfs ${STORAGE}:${DISK} \
     --net0 "$NET_CONFIG" \
     --nameserver "$DNS" \
     --features nesting=1,keyctl=1 \
@@ -246,38 +335,26 @@ DADUDE_AGENT_TOKEN=${AGENT_TOKEN}
 DADUDE_CONNECTION_MODE=websocket
 DADUDE_LOG_LEVEL=INFO
 DADUDE_DNS_SERVERS=${DNS}
-
-# Local storage
 DADUDE_DATA_DIR=/var/lib/dadude-agent
-
-# SFTP Fallback (opzionale)
-SFTP_ENABLED=false
 EOF"
 
-# Modifica docker-compose per modalità WebSocket
-pct exec $CTID -- bash -c "cat > /opt/dadude-agent/docker-compose.yml << 'EOF'
-version: '3.8'
-
+# Crea docker-compose per modalità WebSocket
+pct exec $CTID -- bash -c 'cat > /opt/dadude-agent/docker-compose.yml << '"'"'EOF'"'"'
 services:
   dadude-agent:
     build: .
     container_name: dadude-agent-ws
     restart: unless-stopped
     env_file: .env
-    # Modalità WebSocket - nessuna porta esposta!
-    # L'agent si connette al server, non viceversa
     volumes:
       - ./data:/var/lib/dadude-agent
-      - /var/run/docker.sock:/var/run/docker.sock
-      - .:/opt/dadude-agent
-    # Entry point WebSocket
-    command: [\"python\", \"-m\", \"app.agent\"]
+    command: ["python", "-m", "app.agent"]
     healthcheck:
-      test: [\"CMD\", \"python\", \"-c\", \"import sys; sys.exit(0)\"]
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 60s
       timeout: 10s
       retries: 3
-EOF"
+EOF'
 
 # Crea directory dati
 pct exec $CTID -- mkdir -p /opt/dadude-agent/data
@@ -289,30 +366,33 @@ pct exec $CTID -- bash -c "cd /opt/dadude-agent && docker compose build && docke
 
 sleep 5
 
-# Verifica
+# Verifica finale
 echo ""
 echo -e "${GREEN}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║    ✅ Installazione Completata!                          ║${NC}"
+echo -e "${GREEN}║           ✅ INSTALLAZIONE COMPLETATA!                   ║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo "Container ID:  $CTID"
-echo "Hostname:      $HOSTNAME"
-echo "Agent ID:      $AGENT_ID"
-echo "Agent Name:    $AGENT_NAME"
-echo "Agent Token:   $AGENT_TOKEN"
-echo "Mode:          WebSocket mTLS (agent-initiated)"
+echo -e "${BLUE}Dettagli Agent:${NC}"
+echo "  Container ID:  $CTID"
+echo "  Hostname:      $HOSTNAME"
+echo "  Agent ID:      $AGENT_ID"
+echo "  Agent Name:    $AGENT_NAME"
+echo "  Agent Token:   $AGENT_TOKEN"
+echo "  Server URL:    $SERVER_URL"
+echo "  IP:            $IP"
 echo ""
-echo -e "${YELLOW}IMPORTANTE: Nessuna porta in ascolto!${NC}"
-echo "L'agent si connette al server via WebSocket."
+echo -e "${YELLOW}NOTA: L'agent opera in modalità WebSocket${NC}"
+echo "  - Nessuna porta in ascolto"
+echo "  - L'agent si connette al server (non viceversa)"
+echo "  - Funziona anche dietro NAT/firewall"
 echo ""
-echo "Prossimi passi:"
-echo "1. Verifica i log: pct exec $CTID -- docker logs dadude-agent-ws"
-echo "2. L'agent tenterà di registrarsi automaticamente"
-echo "3. Approva l'agent dal pannello DaDude: /agents"
-echo "4. Dopo approvazione, l'agent richiederà certificato mTLS"
+echo -e "${BLUE}Prossimi passi:${NC}"
+echo "  1. Verifica i log: pct exec $CTID -- docker logs dadude-agent-ws"
+echo "  2. L'agent si registrerà automaticamente al server"
+echo "  3. Approva l'agent dal pannello DaDude: ${SERVER_URL}/agents"
 echo ""
-echo "Comandi utili:"
-echo "  pct exec $CTID -- docker logs -f dadude-agent-ws"
-echo "  pct exec $CTID -- docker exec dadude-agent-ws cat /var/lib/dadude-agent/queue.db"
+echo -e "${BLUE}Comandi utili:${NC}"
+echo "  pct exec $CTID -- docker logs -f dadude-agent-ws    # Log in tempo reale"
+echo "  pct exec $CTID -- docker restart dadude-agent-ws    # Riavvia agent"
+echo "  pct exec $CTID -- bash                              # Shell nel container"
 echo ""
-
