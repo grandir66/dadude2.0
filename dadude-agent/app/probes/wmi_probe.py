@@ -52,7 +52,15 @@ async def probe(
         def get_prop(props, name, default=""):
             if name in props:
                 val = props[name].get('value', default)
-                return val if val is not None else default
+                if val is None:
+                    return default
+                # Converti bytes in string se necessario (Python 3 compatibility)
+                if isinstance(val, bytes):
+                    try:
+                        val = val.decode('utf-8', errors='replace')
+                    except:
+                        val = str(val)
+                return val
             return default
         
         def query_single(query: str) -> Dict:
