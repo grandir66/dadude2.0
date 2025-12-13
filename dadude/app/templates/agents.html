@@ -466,16 +466,19 @@ async function rejectAgent(agentId) {
 
 async function testAgent(agentId, address, port) {
     try {
-        const response = await fetch(`http://${address}:${port}/health`, {
-            mode: 'cors',
-            headers: { 'Accept': 'application/json' }
-        });
+        // Usa l'API del server per verificare (supporta WebSocket e HTTP)
+        const response = await fetch(`/api/v1/agents/${agentId}/verify-version`);
+        const data = await response.json();
         
-        if (response.ok) {
-            const data = await response.json();
-            alert(`✅ Agent OK\n\nID: ${data.agent_id}\nNome: ${data.agent_name}\nVersione: ${data.version}`);
+        if (data.success && data.agent_online) {
+            let connType = data.connection_type === 'websocket' ? '🔌 WebSocket' : '🌐 HTTP';
+            alert(`✅ Agent Online!\n\n` +
+                  `Nome: ${data.agent_name}\n` +
+                  `Versione: ${data.real_version}\n` +
+                  `Connessione: ${connType}\n` +
+                  (data.ws_agent_id ? `WS ID: ${data.ws_agent_id}` : `URL: http://${address}:${port}`));
         } else {
-            alert('❌ Agent non raggiungibile');
+            alert(`❌ Agent Offline\n\n${data.error || 'Non raggiungibile'}`);
         }
     } catch (e) {
         alert('❌ Errore: ' + e.message);
