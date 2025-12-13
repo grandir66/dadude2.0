@@ -1132,24 +1132,58 @@ async def scan_customer_networks(
                 scan_result = None
         
         if not scan_result or not scan_result.get("success"):
-            # OPZIONE C: Nessun MikroTik o fallback - usa Docker agent con ARP attivo
-            logger.info(f"[SCAN VIA DOCKER AGENT] Using {agent.address}:{agent.agent_api_port} for network scan on {network.ip_network}")
-            agent_config = AgentConfig(
-                agent_id=agent.id,
-                agent_url=agent_url,
-                agent_token=agent_token,
-            )
+            # OPZIONE C: Nessun MikroTik o fallback - usa Docker agent
+            # Prima verifica se l'agent è connesso via WebSocket
+            from ..services.websocket_hub import get_websocket_hub, CommandType
+            hub = get_websocket_hub()
             
-            agent_client = AgentClient(agent_config)
-            try:
-                logger.info(f"Starting network scan via Docker agent: network={network.ip_network}")
-                scan_result = await agent_client.scan_network(network.ip_network, scan_type=scan_type)
-                logger.info(f"[SCAN VIA DOCKER AGENT] Scan completed: {scan_result.get('devices_found', 0)} devices found")
-            except Exception as e:
-                logger.error(f"Docker agent scan failed: {e}", exc_info=True)
-                raise HTTPException(status_code=500, detail=f"Errore scansione Docker agent: {e}")
-            finally:
-                await agent_client.close()
+            ws_agent_id = None
+            for conn_id in hub._connections.keys():
+                if agent.name and agent.name in conn_id:
+                    ws_agent_id = conn_id
+                    break
+            
+            if ws_agent_id and ws_agent_id in hub._connections:
+                # Agent connesso via WebSocket - usa comando WS
+                logger.info(f"[SCAN VIA WEBSOCKET] Using WebSocket connection {ws_agent_id} for network scan on {network.ip_network}")
+                try:
+                    result = await hub.send_command(
+                        ws_agent_id,
+                        CommandType.SCAN_NETWORK,
+                        params={"network": network.ip_network, "scan_type": scan_type},
+                        timeout=120.0
+                    )
+                    
+                    if result.status == "success":
+                        scan_result = result.data or {}
+                        scan_result["success"] = True
+                        scan_result["devices_found"] = len(scan_result.get("devices", []))
+                        logger.info(f"[SCAN VIA WEBSOCKET] Scan completed: {scan_result.get('devices_found', 0)} devices found")
+                    else:
+                        logger.error(f"WebSocket scan failed: {result.error}")
+                        raise HTTPException(status_code=500, detail=f"Errore scansione WebSocket: {result.error}")
+                except Exception as e:
+                    logger.error(f"WebSocket scan failed: {e}", exc_info=True)
+                    raise HTTPException(status_code=500, detail=f"Errore scansione WebSocket: {e}")
+            else:
+                # Fallback: agent non connesso via WebSocket, prova HTTP
+                logger.info(f"[SCAN VIA DOCKER AGENT HTTP] Using {agent.address}:{agent.agent_api_port} for network scan on {network.ip_network}")
+                agent_config = AgentConfig(
+                    agent_id=agent.id,
+                    agent_url=agent_url,
+                    agent_token=agent_token,
+                )
+                
+                agent_client = AgentClient(agent_config)
+                try:
+                    logger.info(f"Starting network scan via Docker agent: network={network.ip_network}")
+                    scan_result = await agent_client.scan_network(network.ip_network, scan_type=scan_type)
+                    logger.info(f"[SCAN VIA DOCKER AGENT] Scan completed: {scan_result.get('devices_found', 0)} devices found")
+                except Exception as e:
+                    logger.error(f"Docker agent scan failed: {e}", exc_info=True)
+                    raise HTTPException(status_code=500, detail=f"Errore scansione Docker agent: {e}")
+                finally:
+                    await agent_client.close()
     
     # MikroTik agent - Usa API o SSH in base al tipo di connessione
     elif agent.connection_type in ["api", "both"]:
