@@ -1157,7 +1157,10 @@ async def scan_customer_networks(
                     if result.status == "success":
                         scan_result = result.data or {}
                         scan_result["success"] = True
-                        scan_result["devices_found"] = len(scan_result.get("devices", []))
+                        # L'agent restituisce "hosts", normalizziamo a "devices"
+                        hosts = scan_result.get("hosts", scan_result.get("devices", []))
+                        scan_result["devices"] = hosts
+                        scan_result["devices_found"] = len(hosts)
                         logger.info(f"[SCAN VIA WEBSOCKET] Scan completed: {scan_result.get('devices_found', 0)} devices found")
                     else:
                         logger.error(f"WebSocket scan failed: {result.error}")
