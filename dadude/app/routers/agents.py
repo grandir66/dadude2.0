@@ -354,7 +354,7 @@ async def list_pending_agents():
 # ==========================================
 
 # Versione corrente del server
-SERVER_VERSION = "2.0.2"
+SERVER_VERSION = "2.0.3"
 GITHUB_REPO = "grandir66/dadude"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}"
 
@@ -375,66 +375,67 @@ async def get_server_version():
 async def check_server_update():
     """
     Controlla se è disponibile una nuova versione del server su GitHub.
+    Legge direttamente la versione dal file agents.py su GitHub.
     """
+    import re
+    
     try:
         import httpx
         
         async with httpx.AsyncClient(timeout=15) as client:
-            # Controlla l'ultimo tag/release
-            response = await client.get(
-                f"{GITHUB_API}/releases/latest",
-                headers={"Accept": "application/vnd.github.v3+json"}
-            )
+            # Leggi versione dal file raw su GitHub
+            raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/dadude/app/routers/agents.py"
+            response = await client.get(raw_url)
             
             if response.status_code == 200:
-                release = response.json()
-                latest_version = release.get("tag_name", "").lstrip("v")
+                content = response.text
                 
-                needs_update = _compare_versions(SERVER_VERSION, latest_version) < 0
-                
-                return {
-                    "success": True,
-                    "current_version": SERVER_VERSION,
-                    "latest_version": latest_version,
-                    "needs_update": needs_update,
-                    "release_name": release.get("name"),
-                    "release_date": release.get("published_at"),
-                    "release_url": release.get("html_url"),
-                    "changelog": release.get("body", "")[:500],
-                }
-            elif response.status_code == 404:
-                # Nessuna release pubblicata, prova con i commit
-                commits_resp = await client.get(
-                    f"{GITHUB_API}/commits?per_page=1",
-                    headers={"Accept": "application/vnd.github.v3+json"}
-                )
-                
-                if commits_resp.status_code == 200:
-                    commits = commits_resp.json()
-                    if commits:
-                        latest_commit = commits[0]
-                        return {
-                            "success": True,
-                            "current_version": SERVER_VERSION,
-                            "latest_version": "dev",
-                            "needs_update": True,
-                            "release_name": "Latest commit",
-                            "release_date": latest_commit.get("commit", {}).get("author", {}).get("date"),
-                            "release_url": latest_commit.get("html_url"),
-                            "changelog": latest_commit.get("commit", {}).get("message", "")[:500],
-                            "commit_sha": latest_commit.get("sha", "")[:8],
-                        }
-                
-                return {
-                    "success": False,
-                    "current_version": SERVER_VERSION,
-                    "error": "No releases or commits found",
-                }
+                # Estrai SERVER_VERSION dal file
+                match = re.search(r'SERVER_VERSION\s*=\s*["\']([^"\']+)["\']', content)
+                if match:
+                    latest_version = match.group(1)
+                    needs_update = _compare_versions(SERVER_VERSION, latest_version) < 0
+                    
+                    # Ottieni info ultimo commit
+                    commits_resp = await client.get(
+                        f"{GITHUB_API}/commits?per_page=1",
+                        headers={"Accept": "application/vnd.github.v3+json"}
+                    )
+                    
+                    changelog = ""
+                    release_date = None
+                    commit_sha = None
+                    
+                    if commits_resp.status_code == 200:
+                        commits = commits_resp.json()
+                        if commits:
+                            latest_commit = commits[0]
+                            changelog = latest_commit.get("commit", {}).get("message", "")[:500]
+                            release_date = latest_commit.get("commit", {}).get("author", {}).get("date")
+                            commit_sha = latest_commit.get("sha", "")[:8]
+                    
+                    return {
+                        "success": True,
+                        "current_version": SERVER_VERSION,
+                        "latest_version": latest_version,
+                        "needs_update": needs_update,
+                        "release_name": f"v{latest_version}" if needs_update else "Current",
+                        "release_date": release_date,
+                        "release_url": f"https://github.com/{GITHUB_REPO}/commits/main",
+                        "changelog": changelog,
+                        "commit_sha": commit_sha,
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "current_version": SERVER_VERSION,
+                        "error": "Could not parse version from GitHub",
+                    }
             else:
                 return {
                     "success": False,
                     "current_version": SERVER_VERSION,
-                    "error": f"GitHub API error: {response.status_code}",
+                    "error": f"GitHub raw file error: {response.status_code}",
                 }
                 
     except Exception as e:
@@ -1033,9 +1034,25 @@ async def restart_agent(agent_db_id: str):
 async def list_outdated_agents():
     """
     Lista tutti gli agent che hanno bisogno di aggiornamento.
+    Legge la versione latest da GitHub per confronto accurato.
     """
+    import re
+    import httpx
     from ..models.database import AgentAssignment, init_db, get_session
     from ..config import get_settings
+    
+    # Leggi versione agent da GitHub
+    latest_agent_version = AGENT_VERSION
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            raw_url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/dadude-agent/app/agent.py"
+            response = await client.get(raw_url)
+            if response.status_code == 200:
+                match = re.search(r'AGENT_VERSION\s*=\s*["\']([^"\']+)["\']', response.text)
+                if match:
+                    latest_agent_version = match.group(1)
+    except Exception as e:
+        logger.warning(f"Could not fetch agent version from GitHub: {e}")
     
     settings = get_settings()
     db_url = settings.database_url.replace("+aiosqlite", "")
@@ -1050,20 +1067,20 @@ async def list_outdated_agents():
         outdated = []
         for agent in agents:
             agent_version = agent.version or "0.0.0"
-            if _compare_versions(agent_version, AGENT_VERSION) < 0:
+            if _compare_versions(agent_version, latest_agent_version) < 0:
                 outdated.append({
                     "id": agent.id,
                     "name": agent.name,
                     "address": agent.address,
                     "current_version": agent_version,
-                    "latest_version": AGENT_VERSION,
+                    "latest_version": latest_agent_version,
                     "customer_id": agent.customer_id,
                 })
         
         return {
             "total_agents": len(agents),
             "outdated_count": len(outdated),
-            "latest_version": AGENT_VERSION,
+            "latest_version": latest_agent_version,
             "outdated_agents": outdated,
         }
     finally:
