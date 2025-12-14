@@ -32,14 +32,23 @@ class SNMPArpService:
     def _check_pysnmp(self) -> bool:
         """Verifica se pysnmp è disponibile"""
         try:
-            from pysnmp.hlapi import (
+            # pysnmp 7.x
+            from pysnmp.hlapi.v3arch import (
                 getCmd, nextCmd, SnmpEngine, CommunityData,
                 UdpTransportTarget, ContextData, ObjectType, ObjectIdentity
             )
             return True
         except ImportError:
-            logger.warning("pysnmp not available - SNMP ARP lookup disabled")
-            return False
+            try:
+                # pysnmp 4.x fallback
+                from pysnmp.hlapi import (
+                    getCmd, nextCmd, SnmpEngine, CommunityData,
+                    UdpTransportTarget, ContextData, ObjectType, ObjectIdentity
+                )
+                return True
+            except ImportError:
+                logger.warning("pysnmp not available - SNMP ARP lookup disabled")
+                return False
     
     def get_arp_table(
         self,
@@ -70,10 +79,17 @@ class SNMPArpService:
             return {"success": False, "error": "pysnmp not installed"}
         
         try:
-            from pysnmp.hlapi import (
-                nextCmd, SnmpEngine, CommunityData,
-                UdpTransportTarget, ContextData, ObjectType, ObjectIdentity
-            )
+            # pysnmp 7.x / 4.x compatibility
+            try:
+                from pysnmp.hlapi.v3arch import (
+                    nextCmd, SnmpEngine, CommunityData,
+                    UdpTransportTarget, ContextData, ObjectType, ObjectIdentity
+                )
+            except ImportError:
+                from pysnmp.hlapi import (
+                    nextCmd, SnmpEngine, CommunityData,
+                    UdpTransportTarget, ContextData, ObjectType, ObjectIdentity
+                )
             
             # Parse network filter se specificato
             net_filter = None
@@ -176,10 +192,17 @@ class SNMPArpService:
             return {"success": False, "error": "pysnmp not installed"}
         
         try:
-            from pysnmp.hlapi import (
-                getCmd, SnmpEngine, CommunityData,
-                UdpTransportTarget, ContextData, ObjectType, ObjectIdentity
-            )
+            # pysnmp 7.x / 4.x compatibility
+            try:
+                from pysnmp.hlapi.v3arch import (
+                    getCmd, SnmpEngine, CommunityData,
+                    UdpTransportTarget, ContextData, ObjectType, ObjectIdentity
+                )
+            except ImportError:
+                from pysnmp.hlapi import (
+                    getCmd, SnmpEngine, CommunityData,
+                    UdpTransportTarget, ContextData, ObjectType, ObjectIdentity
+                )
             
             result = {}
             

@@ -453,10 +453,18 @@ class CommandHandler:
             return CommandResult(success=False, status="error", error="Missing 'address' parameter")
         
         try:
-            from pysnmp.hlapi import (
-                SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
-                ObjectType, ObjectIdentity, bulkCmd
-            )
+            # pysnmp 7.x usa v3arch invece di hlapi diretto
+            try:
+                from pysnmp.hlapi.v3arch import (
+                    SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
+                    ObjectType, ObjectIdentity, bulkCmd
+                )
+            except ImportError:
+                # Fallback per pysnmp 4.x
+                from pysnmp.hlapi import (
+                    SnmpEngine, CommunityData, UdpTransportTarget, ContextData,
+                    ObjectType, ObjectIdentity, bulkCmd
+                )
             
             loop = asyncio.get_event_loop()
             
