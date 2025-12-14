@@ -37,6 +37,9 @@ services:
       - dadude_logs:/app/logs
     networks:
       - dadude_network
+    dns:
+      - 192.168.4.1
+      - 8.8.8.8
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
