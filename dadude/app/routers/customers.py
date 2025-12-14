@@ -1313,6 +1313,9 @@ async def scan_customer_networks(
     engine = init_db(db_url)
     session = get_session(engine)
     
+    # Inizializza devices_list prima del try per evitare UnboundLocalError
+    devices_list = []
+    
     try:
         # Crea record scansione
         scan_record = ScanResult(
