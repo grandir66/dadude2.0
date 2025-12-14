@@ -16,6 +16,9 @@ paramiko>=3.3.0
 # SNMP
 pysnmp>=7.0.0
 
+# MikroTik RouterOS API
+routeros_api>=0.17.0
+
 # DNS
 dnspython>=2.4.0
 

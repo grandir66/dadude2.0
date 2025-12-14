@@ -1160,7 +1160,7 @@ async def scan_customer_networks(
                         "version": snmp_version,
                         "network_cidr": network.ip_network,
                     },
-                    timeout=60.0
+                    timeout=120.0  # SNMP può essere lento con molti device
                 )
                 if arp_result.status == "success" and arp_result.data:
                     for entry in arp_result.data.get("entries", []):
