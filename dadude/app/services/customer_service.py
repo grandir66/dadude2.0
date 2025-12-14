@@ -465,12 +465,21 @@ class CustomerService:
         active_only: bool = True,
     ) -> List[CredentialSafe]:
         """Lista credenziali (senza secrets)"""
+        from ..models.database import CustomerCredentialLink
+        
         session = self._get_session()
         try:
-            query = session.query(CredentialDB)
-            
             if customer_id:
-                query = query.filter(CredentialDB.customer_id == customer_id)
+                # Usa la tabella di link per trovare credenziali associate al cliente
+                query = session.query(CredentialDB).join(
+                    CustomerCredentialLink,
+                    CustomerCredentialLink.credential_id == CredentialDB.id
+                ).filter(
+                    CustomerCredentialLink.customer_id == customer_id
+                )
+            else:
+                query = session.query(CredentialDB)
+            
             if credential_type:
                 query = query.filter(CredentialDB.credential_type == credential_type)
             if active_only:
