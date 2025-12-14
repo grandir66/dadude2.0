@@ -138,6 +138,10 @@ class NetworkBase(BaseModel):
     dhcp_start: Optional[str] = None
     dhcp_end: Optional[str] = None
     gateway_agent_id: Optional[str] = Field(None, description="MikroTik agent ID per ARP lookup su reti remote")
+    # Alternativa SNMP per router non-MikroTik
+    gateway_snmp_address: Optional[str] = Field(None, description="IP router per ARP via SNMP")
+    gateway_snmp_community: Optional[str] = Field(None, description="SNMP community string")
+    gateway_snmp_version: Optional[str] = Field(None, description="SNMP version: 1, 2c, 3")
     description: Optional[str] = None
     notes: Optional[str] = None
     active: bool = True
@@ -170,6 +174,9 @@ class NetworkUpdate(BaseModel):
     dhcp_start: Optional[str] = None
     dhcp_end: Optional[str] = None
     gateway_agent_id: Optional[str] = None
+    gateway_snmp_address: Optional[str] = None
+    gateway_snmp_community: Optional[str] = None
+    gateway_snmp_version: Optional[str] = None
     description: Optional[str] = None
     notes: Optional[str] = None
     active: Optional[bool] = None

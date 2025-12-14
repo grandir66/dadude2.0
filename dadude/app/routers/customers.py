@@ -1083,22 +1083,25 @@ async def scan_customer_networks(
     if agent_type == "docker":
         # =====================================================
         # STRATEGIA IBRIDA per Docker Agent:
-        # 1. Se la rete ha gateway_agent_id, usa MikroTik per ARP table
+        # 1. Se la rete ha gateway configurato (MikroTik o SNMP), usa per ARP table
         # 2. Esegui nmap scan via WebSocket
         # 3. Merge: IP da nmap + MAC da ARP (se disponibile)
         # =====================================================
         from ..services.agent_client import AgentClient, AgentConfig
         from ..services.mikrotik_service import get_mikrotik_service
+        from ..services.snmp_arp_service import get_snmp_arp_service
         
-        # Step 1: Ottieni cache ARP da gateway MikroTik (se configurato)
+        # Step 1: Ottieni cache ARP da gateway (MikroTik API o SNMP generico)
         arp_cache = {}  # {ip: mac}
         gateway_agent_id = getattr(network, 'gateway_agent_id', None)
+        gateway_snmp_address = getattr(network, 'gateway_snmp_address', None)
+        gateway_snmp_community = getattr(network, 'gateway_snmp_community', None)
         
         if gateway_agent_id:
-            # Usa il gateway MikroTik specificato per la rete
+            # Opzione 1: Usa gateway MikroTik specificato (API RouterOS)
             gateway_agent = service.get_agent(gateway_agent_id, include_password=True)
             if gateway_agent:
-                logger.info(f"[ARP CACHE] Using gateway MikroTik {gateway_agent.name} ({gateway_agent.address}) for network {network.ip_network}")
+                logger.info(f"[ARP CACHE] Using MikroTik {gateway_agent.name} ({gateway_agent.address}) for network {network.ip_network}")
                 try:
                     mikrotik_svc = get_mikrotik_service()
                     arp_result = mikrotik_svc.get_arp_for_network(
@@ -1112,9 +1115,29 @@ async def scan_customer_networks(
                     if arp_result.get("success"):
                         for entry in arp_result.get("entries", []):
                             arp_cache[entry["ip"]] = entry["mac"]
-                        logger.info(f"[ARP CACHE] Got {len(arp_cache)} MAC addresses from gateway")
+                        logger.info(f"[ARP CACHE] Got {len(arp_cache)} MAC addresses from MikroTik API")
                 except Exception as e:
-                    logger.warning(f"[ARP CACHE] Failed to get ARP from gateway: {e}")
+                    logger.warning(f"[ARP CACHE] MikroTik API failed: {e}")
+        
+        elif gateway_snmp_address and gateway_snmp_community:
+            # Opzione 2: Usa gateway generico via SNMP (Cisco, Ubiquiti, HP, etc.)
+            logger.info(f"[ARP CACHE] Using SNMP on {gateway_snmp_address} for network {network.ip_network}")
+            try:
+                snmp_svc = get_snmp_arp_service()
+                snmp_version = getattr(network, 'gateway_snmp_version', '2c') or '2c'
+                arp_result = snmp_svc.get_arp_table(
+                    address=gateway_snmp_address,
+                    community=gateway_snmp_community,
+                    network_filter=network.ip_network,
+                    snmp_version=snmp_version,
+                )
+                if arp_result.get("success"):
+                    for entry in arp_result.get("entries", []):
+                        arp_cache[entry["ip"]] = entry["mac"]
+                    logger.info(f"[ARP CACHE] Got {len(arp_cache)} MAC addresses from SNMP")
+            except Exception as e:
+                logger.warning(f"[ARP CACHE] SNMP failed: {e}")
+        
         else:
             # Fallback: cerca un MikroTik qualsiasi del cliente
             all_agents = service.list_agents(customer_id=agent.customer_id, active_only=True)

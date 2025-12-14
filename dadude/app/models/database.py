@@ -76,8 +76,14 @@ class Network(Base):
     dhcp_end = Column(String(50), nullable=True)
     
     # Gateway router per ARP lookup su reti remote
-    # Se specificato, usa questo MikroTik per leggere la tabella ARP
+    # Se specificato, usa questo agent per leggere la tabella ARP
     gateway_agent_id = Column(String(8), ForeignKey("agent_assignments.id"), nullable=True)
+    
+    # Alternativa: gateway SNMP generico (per router non-MikroTik)
+    # Se gateway_agent_id è NULL ma questi sono valorizzati, usa SNMP
+    gateway_snmp_address = Column(String(50), nullable=True)  # IP del router
+    gateway_snmp_community = Column(String(100), nullable=True)  # Community string
+    gateway_snmp_version = Column(String(10), nullable=True)  # 1, 2c, 3
     
     description = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
