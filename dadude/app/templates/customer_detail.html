@@ -2254,16 +2254,17 @@ async function scanCustomerNetworks(agentId) {
             msg += `Rete: ${r.network_name} (${r.network_cidr})\n`;
             msg += `Dispositivi trovati: ${r.devices_found}\n\n`;
             
-            // Mostra primi 10 dispositivi
-            if (r.results && r.results.length > 0) {
+            // Mostra primi 10 dispositivi (devices è il campo corretto)
+            const deviceList = r.devices || r.results || [];
+            if (deviceList.length > 0) {
                 msg += `Primi dispositivi:\n`;
-                r.results.slice(0, 10).forEach(d => {
-                    const name = d.identity || d.address || 'N/A';
+                deviceList.slice(0, 10).forEach(d => {
+                    const name = d.hostname || d.identity || d.address || 'N/A';
                     const mac = d.mac_address || '';
                     msg += `• ${name} - ${d.address || ''} ${mac ? '('+mac+')' : ''}\n`;
                 });
-                if (r.results.length > 10) {
-                    msg += `\n... e altri ${r.results.length - 10} dispositivi`;
+                if (deviceList.length > 10) {
+                    msg += `\n... e altri ${deviceList.length - 10} dispositivi`;
                 }
             }
             
