@@ -648,6 +648,98 @@ async def delete_agent(agent_id: str):
     return {"status": "deleted", "agent_id": agent_id}
 
 
+@router.post("/agents/{agent_id}/reassign")
+async def reassign_agent(
+    agent_id: str,
+    new_customer_id: str = Query(..., description="ID del nuovo cliente"),
+):
+    """
+    Riassegna un agent a un nuovo cliente.
+    """
+    service = get_customer_service()
+    
+    # Verifica che l'agent esista
+    agent = service.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent non trovato")
+    
+    # Verifica che il nuovo cliente esista
+    new_customer = service.get_customer(new_customer_id)
+    if not new_customer:
+        raise HTTPException(status_code=404, detail="Cliente non trovato")
+    
+    # Aggiorna customer_id
+    from ..models.database import AgentAssignment, init_db, get_session
+    from ..config import get_settings
+    
+    settings = get_settings()
+    db_url = settings.database_url.replace("+aiosqlite", "")
+    engine = init_db(db_url)
+    session = get_session(engine)
+    
+    try:
+        db_agent = session.query(AgentAssignment).filter(AgentAssignment.id == agent_id).first()
+        if db_agent:
+            old_customer_id = db_agent.customer_id
+            db_agent.customer_id = new_customer_id
+            db_agent.status = "approved"
+            db_agent.active = True
+            session.commit()
+            
+            return {
+                "success": True,
+                "message": f"Agent riassegnato a {new_customer.name}",
+                "agent_id": agent_id,
+                "old_customer_id": old_customer_id,
+                "new_customer_id": new_customer_id,
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Agent non trovato nel database")
+    finally:
+        session.close()
+
+
+@router.post("/agents/{agent_id}/unassign")
+async def unassign_agent(agent_id: str):
+    """
+    Dissocia un agent dal cliente (torna in pending).
+    """
+    service = get_customer_service()
+    
+    # Verifica che l'agent esista
+    agent = service.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent non trovato")
+    
+    from ..models.database import AgentAssignment, init_db, get_session
+    from ..config import get_settings
+    
+    settings = get_settings()
+    db_url = settings.database_url.replace("+aiosqlite", "")
+    engine = init_db(db_url)
+    session = get_session(engine)
+    
+    try:
+        db_agent = session.query(AgentAssignment).filter(AgentAssignment.id == agent_id).first()
+        if db_agent:
+            old_customer_id = db_agent.customer_id
+            db_agent.customer_id = None
+            db_agent.status = "pending_approval"
+            db_agent.active = False
+            session.commit()
+            
+            return {
+                "success": True,
+                "message": "Agent dissociato dal cliente",
+                "agent_id": agent_id,
+                "old_customer_id": old_customer_id,
+            }
+        else:
+            raise HTTPException(status_code=404, detail="Agent non trovato nel database")
+    finally:
+        session.close()
+
+
 @router.post("/agents/{agent_id}/test")
 async def test_agent_connection(
     agent_id: str,

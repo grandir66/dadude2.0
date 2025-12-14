@@ -163,6 +163,47 @@
     </div>
 </div>
 
+<!-- Modal Riassegna Agent -->
+<div class="modal fade" id="reassignModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-arrow-left-right"></i> Riassegna Agent</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Agent</label>
+                    <input type="text" class="form-control" id="reassign-agent-name" readonly>
+                    <input type="hidden" id="reassign-agent-id">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Cliente Attuale</label>
+                    <input type="text" class="form-control" id="reassign-current-customer" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Nuovo Cliente *</label>
+                    <select class="form-select" id="reassign-customer-id" required>
+                        <option value="">-- Seleziona Nuovo Cliente --</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Oppure</label>
+                    <button type="button" class="btn btn-outline-warning w-100" onclick="unassignAgent()">
+                        <i class="bi bi-x-circle"></i> Dissocia da Cliente (rende pending)
+                    </button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                <button type="button" class="btn btn-primary" onclick="confirmReassign()">
+                    <i class="bi bi-check-lg"></i> Riassegna
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 let customers = [];
 
@@ -319,6 +360,9 @@ async function loadActiveAgents() {
                             <td>${a.version || 'N/A'}</td>
                             <td>
                                 <div class="btn-group btn-group-sm">
+                                    <button class="btn btn-outline-secondary" onclick="showReassignModal('${a.id}', '${a.name}', '${a.customer_id}')" title="Riassegna a cliente">
+                                        <i class="bi bi-arrow-left-right"></i>
+                                    </button>
                                     <button class="btn btn-outline-primary" onclick="testAgent('${a.id}', '${a.address}', ${a.agent_api_port || 8080})" title="Test connessione">
                                         <i class="bi bi-broadcast"></i>
                                     </button>
@@ -483,6 +527,79 @@ async function deleteAgent(agentId, agentName) {
         } else {
             const error = await response.json();
             alert('Errore: ' + (error.detail || 'Eliminazione fallita'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+function showReassignModal(agentId, agentName, currentCustomerId) {
+    document.getElementById('reassign-agent-id').value = agentId;
+    document.getElementById('reassign-agent-name').value = agentName;
+    
+    // Trova nome cliente attuale
+    const currentCustomer = customers.find(c => c.id === currentCustomerId);
+    document.getElementById('reassign-current-customer').value = currentCustomer ? currentCustomer.name : 'N/A';
+    
+    // Popola dropdown clienti (escludi cliente attuale)
+    const select = document.getElementById('reassign-customer-id');
+    select.innerHTML = '<option value="">-- Seleziona Nuovo Cliente --</option>';
+    customers.forEach(c => {
+        if (c.id !== currentCustomerId) {
+            select.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+        }
+    });
+    
+    new bootstrap.Modal(document.getElementById('reassignModal')).show();
+}
+
+async function confirmReassign() {
+    const agentId = document.getElementById('reassign-agent-id').value;
+    const newCustomerId = document.getElementById('reassign-customer-id').value;
+    
+    if (!newCustomerId) {
+        alert('Seleziona un cliente');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/customers/agents/${agentId}/reassign?new_customer_id=${newCustomerId}`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('reassignModal')).hide();
+            alert('Agent riassegnato con successo!');
+            loadAgents();
+        } else {
+            const data = await response.json();
+            alert('Errore: ' + (data.detail || 'Riassegnazione fallita'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+async function unassignAgent() {
+    const agentId = document.getElementById('reassign-agent-id').value;
+    const agentName = document.getElementById('reassign-agent-name').value;
+    
+    if (!confirm(`Dissociare l'agent "${agentName}" dal cliente?\n\nL'agent tornerà in stato "pending" e dovrà essere riassegnato.`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/customers/agents/${agentId}/unassign`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('reassignModal')).hide();
+            alert('Agent dissociato. Ora appare nella lista "In Attesa di Approvazione".');
+            loadAgents();
+        } else {
+            const data = await response.json();
+            alert('Errore: ' + (data.detail || 'Dissociazione fallita'));
         }
     } catch (e) {
         alert('Errore: ' + e.message);
