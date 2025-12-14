@@ -1043,9 +1043,8 @@ async def exec_command_on_agent(
             # Esegui su host remoto via SSH
             result = await hub.send_command(
                 ws_agent_id,
-                CommandType.PROBE_SSH,  # Usiamo un tipo generico
+                CommandType.EXEC_SSH,
                 {
-                    "action": "exec_ssh",
                     "host": target_host,
                     "command": command,
                     "username": username,
@@ -1059,9 +1058,8 @@ async def exec_command_on_agent(
             # Esegui localmente sull'agent
             result = await hub.send_command(
                 ws_agent_id,
-                CommandType.PROBE_SSH,  # Usiamo un tipo generico
+                CommandType.EXEC_COMMAND,
                 {
-                    "action": "exec_command",
                     "command": command,
                     "timeout": timeout,
                 },

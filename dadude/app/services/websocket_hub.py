@@ -46,6 +46,8 @@ class CommandType(str, Enum):
     RESTART = "restart"
     REBOOT = "reboot"
     GET_STATUS = "get_status"
+    EXEC_COMMAND = "exec_command"  # Esegui comando locale sull'agent
+    EXEC_SSH = "exec_ssh"  # Esegui comando su host remoto via SSH
 
 
 @dataclass
