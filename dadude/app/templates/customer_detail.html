@@ -121,6 +121,7 @@
                         <th>VLAN</th>
                         <th>ARP Source</th>
                         <th>Stato</th>
+                        <th>Azioni</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -154,9 +155,16 @@
                             <span class="badge bg-secondary">Inattiva</span>
                             {% endif %}
                         </td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-primary" 
+                                    onclick="configureGateway('{{ net.id }}', '{{ net.name }}', '{{ net.gateway_agent_id or '' }}', '{{ net.gateway_snmp_address or '' }}', '{{ net.gateway_snmp_community or '' }}', '{{ net.gateway_snmp_version or '2c' }}')"
+                                    title="Configura Gateway ARP">
+                                <i class="bi bi-diagram-3"></i>
+                            </button>
+                        </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="7" class="text-center py-4 text-muted">Nessuna rete configurata</td></tr>
+                    <tr><td colspan="8" class="text-center py-4 text-muted">Nessuna rete configurata</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -617,6 +625,72 @@
     </div>
 </div>
 
+<!-- Modal Configura Gateway ARP -->
+<div class="modal fade" id="gatewayModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-diagram-3"></i> Configura Gateway ARP</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="gatewayForm">
+                <input type="hidden" name="network_id" id="gw_network_id">
+                <div class="modal-body">
+                    <p class="text-muted mb-3">
+                        <strong id="gw_network_name"></strong><br>
+                        <small>Configura come recuperare la tabella ARP per questa rete.</small>
+                    </p>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Metodo</label>
+                        <select class="form-select" id="gw_method" onchange="toggleGatewayFields()">
+                            <option value="none">Nessuno (fallback automatico)</option>
+                            <option value="mikrotik">MikroTik API</option>
+                            <option value="snmp">SNMP generico</option>
+                        </select>
+                    </div>
+                    
+                    <div id="gw_mikrotik_fields" style="display:none;">
+                        <label class="form-label">Router MikroTik</label>
+                        <select class="form-select" id="gw_agent_id">
+                            <option value="">-- Seleziona --</option>
+                            {% for agent in agents %}
+                            {% if agent.agent_type == 'mikrotik' %}
+                            <option value="{{ agent.id }}">{{ agent.name }} ({{ agent.address }})</option>
+                            {% endif %}
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div id="gw_snmp_fields" style="display:none;">
+                        <div class="mb-2">
+                            <label class="form-label">IP Router</label>
+                            <input type="text" class="form-control" id="gw_snmp_address" placeholder="192.168.1.1">
+                        </div>
+                        <div class="row">
+                            <div class="col-8 mb-2">
+                                <label class="form-label">Community</label>
+                                <input type="text" class="form-control" id="gw_snmp_community" placeholder="public">
+                            </div>
+                            <div class="col-4 mb-2">
+                                <label class="form-label">Versione</label>
+                                <select class="form-select" id="gw_snmp_version">
+                                    <option value="2c">v2c</option>
+                                    <option value="1">v1</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-check"></i> Salva</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Modal Nuova Credenziale -->
 <div class="modal fade" id="newCredentialModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -855,6 +929,70 @@ function toggleSNMPv3Fields() {
     const version = document.getElementById('snmpVersion').value;
     document.getElementById('fieldsSNMPv3').style.display = version === '3' ? 'block' : 'none';
 }
+
+// Gateway ARP Configuration
+function toggleGatewayFields() {
+    const method = document.getElementById('gw_method').value;
+    document.getElementById('gw_mikrotik_fields').style.display = method === 'mikrotik' ? 'block' : 'none';
+    document.getElementById('gw_snmp_fields').style.display = method === 'snmp' ? 'block' : 'none';
+}
+
+function configureGateway(networkId, networkName, agentId, snmpAddr, snmpCommunity, snmpVersion) {
+    document.getElementById('gw_network_id').value = networkId;
+    document.getElementById('gw_network_name').textContent = networkName;
+    
+    // Determine method
+    let method = 'none';
+    if (agentId) {
+        method = 'mikrotik';
+        document.getElementById('gw_agent_id').value = agentId;
+    } else if (snmpAddr) {
+        method = 'snmp';
+        document.getElementById('gw_snmp_address').value = snmpAddr;
+        document.getElementById('gw_snmp_community').value = snmpCommunity || 'public';
+        document.getElementById('gw_snmp_version').value = snmpVersion || '2c';
+    }
+    document.getElementById('gw_method').value = method;
+    toggleGatewayFields();
+    
+    new bootstrap.Modal(document.getElementById('gatewayModal')).show();
+}
+
+document.getElementById('gatewayForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const networkId = document.getElementById('gw_network_id').value;
+    const method = document.getElementById('gw_method').value;
+    
+    let data = {
+        gateway_agent_id: null,
+        gateway_snmp_address: null,
+        gateway_snmp_community: null,
+        gateway_snmp_version: null
+    };
+    
+    if (method === 'mikrotik') {
+        data.gateway_agent_id = document.getElementById('gw_agent_id').value || null;
+    } else if (method === 'snmp') {
+        data.gateway_snmp_address = document.getElementById('gw_snmp_address').value || null;
+        data.gateway_snmp_community = document.getElementById('gw_snmp_community').value || 'public';
+        data.gateway_snmp_version = document.getElementById('gw_snmp_version').value || '2c';
+    }
+    
+    try {
+        const response = await fetch(`/api/customers/networks/${networkId}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Errore nel salvataggio');
+        }
+    } catch (err) {
+        alert('Errore: ' + err.message);
+    }
+});
 
 // Init
 document.addEventListener('DOMContentLoaded', function() {
