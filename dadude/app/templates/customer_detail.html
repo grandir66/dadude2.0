@@ -167,7 +167,11 @@
                                             vlan_id: {{ net.vlan_id or 'null' }},
                                             dns_primary: '{{ net.dns_primary or '' }}',
                                             active: {{ 'true' if net.active else 'false' }},
-                                            description: '{{ (net.description or '') | e }}'
+                                            description: '{{ (net.description or '') | e }}',
+                                            gateway_agent_id: '{{ net.gateway_agent_id or '' }}',
+                                            gateway_snmp_address: '{{ net.gateway_snmp_address or '' }}',
+                                            gateway_snmp_community: '{{ net.gateway_snmp_community or '' }}',
+                                            gateway_snmp_version: '{{ net.gateway_snmp_version or '2c' }}'
                                         })"
                                         title="Modifica rete">
                                     <i class="bi bi-pencil"></i>
@@ -772,6 +776,48 @@
                         <label class="form-label">Descrizione</label>
                         <textarea class="form-control" id="edit_net_desc" rows="2"></textarea>
                     </div>
+                    
+                    <!-- Gateway ARP -->
+                    <hr class="my-3">
+                    <h6 class="text-muted"><i class="bi bi-diagram-3"></i> Gateway ARP (reti remote)</h6>
+                    <div class="mb-3">
+                        <label class="form-label">Metodo</label>
+                        <select class="form-select" id="edit_net_gw_method" onchange="toggleEditGatewayFields()">
+                            <option value="none">Nessuno (fallback automatico)</option>
+                            <option value="mikrotik">MikroTik API</option>
+                            <option value="snmp">SNMP generico</option>
+                        </select>
+                    </div>
+                    <div id="edit_gw_mikrotik" style="display:none;">
+                        <label class="form-label">Router MikroTik</label>
+                        <select class="form-select" id="edit_net_gw_agent">
+                            <option value="">-- Seleziona --</option>
+                            {% for agent in agents %}
+                            {% if agent.agent_type == 'mikrotik' %}
+                            <option value="{{ agent.id }}">{{ agent.name }} ({{ agent.address }})</option>
+                            {% endif %}
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div id="edit_gw_snmp" style="display:none;">
+                        <div class="row">
+                            <div class="col-5 mb-2">
+                                <label class="form-label">IP Router</label>
+                                <input type="text" class="form-control" id="edit_net_snmp_addr" placeholder="192.168.1.1">
+                            </div>
+                            <div class="col-4 mb-2">
+                                <label class="form-label">Community</label>
+                                <input type="text" class="form-control" id="edit_net_snmp_comm" placeholder="public">
+                            </div>
+                            <div class="col-3 mb-2">
+                                <label class="form-label">Versione</label>
+                                <select class="form-select" id="edit_net_snmp_ver">
+                                    <option value="2c">v2c</option>
+                                    <option value="1">v1</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
@@ -1033,12 +1079,33 @@ function editNetwork(net) {
     document.getElementById('edit_net_active').value = net.active ? 'true' : 'false';
     document.getElementById('edit_net_desc').value = net.description || '';
     
+    // Gateway ARP fields
+    let method = 'none';
+    if (net.gateway_agent_id) {
+        method = 'mikrotik';
+        document.getElementById('edit_net_gw_agent').value = net.gateway_agent_id;
+    } else if (net.gateway_snmp_address) {
+        method = 'snmp';
+        document.getElementById('edit_net_snmp_addr').value = net.gateway_snmp_address;
+        document.getElementById('edit_net_snmp_comm').value = net.gateway_snmp_community || 'public';
+        document.getElementById('edit_net_snmp_ver').value = net.gateway_snmp_version || '2c';
+    }
+    document.getElementById('edit_net_gw_method').value = method;
+    toggleEditGatewayFields();
+    
     new bootstrap.Modal(document.getElementById('editNetworkModal')).show();
+}
+
+function toggleEditGatewayFields() {
+    const method = document.getElementById('edit_net_gw_method').value;
+    document.getElementById('edit_gw_mikrotik').style.display = method === 'mikrotik' ? 'block' : 'none';
+    document.getElementById('edit_gw_snmp').style.display = method === 'snmp' ? 'block' : 'none';
 }
 
 document.getElementById('editNetworkForm').addEventListener('submit', async function(e) {
     e.preventDefault();
     const networkId = document.getElementById('edit_net_id').value;
+    const gwMethod = document.getElementById('edit_net_gw_method').value;
     
     const data = {
         name: document.getElementById('edit_net_name').value,
@@ -1048,7 +1115,11 @@ document.getElementById('editNetworkForm').addEventListener('submit', async func
         vlan_id: document.getElementById('edit_net_vlan').value ? parseInt(document.getElementById('edit_net_vlan').value) : null,
         dns_primary: document.getElementById('edit_net_dns').value || null,
         active: document.getElementById('edit_net_active').value === 'true',
-        description: document.getElementById('edit_net_desc').value || null
+        description: document.getElementById('edit_net_desc').value || null,
+        gateway_agent_id: gwMethod === 'mikrotik' ? (document.getElementById('edit_net_gw_agent').value || null) : null,
+        gateway_snmp_address: gwMethod === 'snmp' ? (document.getElementById('edit_net_snmp_addr').value || null) : null,
+        gateway_snmp_community: gwMethod === 'snmp' ? (document.getElementById('edit_net_snmp_comm').value || null) : null,
+        gateway_snmp_version: gwMethod === 'snmp' ? (document.getElementById('edit_net_snmp_ver').value || null) : null
     };
     
     try {
