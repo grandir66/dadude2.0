@@ -158,7 +158,17 @@
                         <td>
                             <div class="btn-group btn-group-sm">
                                 <button class="btn btn-outline-secondary" 
-                                        onclick="editNetwork({{ net | tojson | e }})"
+                                        onclick="editNetwork({
+                                            id: '{{ net.id }}',
+                                            name: '{{ net.name | e }}',
+                                            network_type: '{{ net.network_type or 'lan' }}',
+                                            ip_network: '{{ net.ip_network }}',
+                                            gateway: '{{ net.gateway or '' }}',
+                                            vlan_id: {{ net.vlan_id or 'null' }},
+                                            dns_primary: '{{ net.dns_primary or '' }}',
+                                            active: {{ 'true' if net.active else 'false' }},
+                                            description: '{{ (net.description or '') | e }}'
+                                        })"
                                         title="Modifica rete">
                                     <i class="bi bi-pencil"></i>
                                 </button>
