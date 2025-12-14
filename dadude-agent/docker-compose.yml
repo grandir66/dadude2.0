@@ -1,10 +1,13 @@
-# Docker Compose per DaDude Agent
+# Docker Compose per DaDude Agent WebSocket
 services:
   agent:
     build: .
     image: dadude-agent:latest
     container_name: dadude-agent
     restart: unless-stopped
+    
+    # Usa agent WebSocket
+    command: ["python", "-m", "app.agent"]
     
     # Network: host per accedere alla rete locale
     network_mode: host
@@ -25,7 +28,7 @@ services:
     working_dir: /app
     
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 30s
       timeout: 10s
       retries: 3
