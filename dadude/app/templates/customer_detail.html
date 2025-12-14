@@ -403,7 +403,7 @@
                         <select class="form-select" id="discoveryNetwork">
                             <option value="">-- Seleziona rete --</option>
                             {% for net in networks %}
-                            <option value="{{ net.ip_network }}">{{ net.name }} ({{ net.ip_network }})</option>
+                            <option value="{{ net.id }}" data-cidr="{{ net.ip_network }}">{{ net.name }} ({{ net.ip_network }})</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -2303,14 +2303,16 @@ async function runCustomerDiscovery() {
     const networkSelect = document.getElementById('discoveryNetwork');
     const agentSelect = document.getElementById('discoveryAgent');
     
-    const networkCidr = networkSelect ? networkSelect.value : '';
+    const networkId = networkSelect ? networkSelect.value : '';
+    const selectedNetworkOption = networkSelect ? networkSelect.options[networkSelect.selectedIndex] : null;
+    const networkCidr = selectedNetworkOption ? selectedNetworkOption.getAttribute('data-cidr') || '' : '';
     const agentId = agentSelect ? agentSelect.value : '';
     
     // Ottieni il tipo di agent dall'attributo data
     const selectedOption = agentSelect ? agentSelect.options[agentSelect.selectedIndex] : null;
     const agentType = selectedOption ? selectedOption.getAttribute('data-agent-type') || 'mikrotik' : 'mikrotik';
     
-    console.log('Discovery - Network:', networkCidr, 'Agent:', agentId, 'Type:', agentType);
+    console.log('Discovery - NetworkId:', networkId, 'NetworkCidr:', networkCidr, 'Agent:', agentId, 'Type:', agentType);
     
     if (!networkCidr) {
         alert('Seleziona una rete da scansionare');
@@ -2332,8 +2334,11 @@ async function runCustomerDiscovery() {
     try {
         let scanUrl;
         if (agentType === 'docker') {
-            // Scansiona via Docker Agent
+            // Scansiona via Docker Agent - passa network_ids se selezionato
             scanUrl = `/api/v1/customers/agents/${agentId}/scan-customer-networks?scan_type=ping`;
+            if (networkId) {
+                scanUrl += `&network_ids=${encodeURIComponent(networkId)}`;
+            }
         } else {
             // Scansiona via sonda MikroTik
             scanUrl = `/api/v1/mikrotik/agents/${agentId}/ip-scan?network=${encodeURIComponent(networkCidr)}`;

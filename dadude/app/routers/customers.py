@@ -1059,21 +1059,28 @@ async def scan_customer_networks(
         raise HTTPException(status_code=404, detail="Sonda non trovata")
     
     # Ottieni reti del cliente
-    networks = service.list_networks(customer_id=agent.customer_id, active_only=True)
+    all_networks = service.list_networks(customer_id=agent.customer_id, active_only=True)
+    logger.info(f"[SCAN DEBUG] All networks for customer: {[(n.id, n.name, n.ip_network) for n in all_networks]}")
+    logger.info(f"[SCAN DEBUG] Requested network_ids: {network_ids}")
     
-    if not networks:
+    if not all_networks:
         raise HTTPException(status_code=400, detail="Nessuna rete configurata per il cliente")
     
     # Filtra reti se specificato
     if network_ids:
-        networks = [n for n in networks if n.id in network_ids]
+        networks = [n for n in all_networks if n.id in network_ids]
+        logger.info(f"[SCAN DEBUG] Filtered networks: {[(n.id, n.name, n.ip_network) for n in networks]}")
+    else:
+        networks = all_networks
+        logger.info(f"[SCAN DEBUG] No filter, using all networks")
     
     if not networks:
         raise HTTPException(status_code=400, detail="Nessuna rete valida selezionata")
     
     # Esegui scansione diretta tramite il router o Docker agent
     scanner = get_scanner_service()
-    network = networks[0]  # Prima rete
+    network = networks[0]  # Prima rete (filtrata)
+    logger.info(f"[SCAN DEBUG] Selected network: {network.id} = {network.name} ({network.ip_network})")
     
     # Verifica tipo agent
     agent_type = getattr(agent, 'agent_type', 'mikrotik') or 'mikrotik'
