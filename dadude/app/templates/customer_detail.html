@@ -333,9 +333,19 @@
                         <td>{{ agent.site_name or agent.location or '-' }}</td>
                         <td>
                             {% if agent.status == 'online' %}
-                            <span class="badge bg-success">Online</span>
+                            <span class="badge bg-success"><i class="bi bi-wifi"></i> Online</span>
+                            {% if agent.ws_connected %}
+                            <small class="text-success d-block"><i class="bi bi-broadcast"></i> WebSocket</small>
+                            {% endif %}
+                            {% elif agent.status == 'reachable' %}
+                            <span class="badge bg-info"><i class="bi bi-arrow-right-circle"></i> Raggiungibile</span>
+                            {% if agent.reachable_via %}
+                            <small class="text-muted d-block">via {{ agent.reachable_via }}</small>
+                            {% endif %}
+                            {% elif agent.status == 'unreachable' %}
+                            <span class="badge bg-warning"><i class="bi bi-exclamation-triangle"></i> Non raggiungibile</span>
                             {% elif agent.status == 'offline' %}
-                            <span class="badge bg-danger">Offline</span>
+                            <span class="badge bg-danger"><i class="bi bi-x-circle"></i> Offline</span>
                             {% elif agent.status == 'partial' %}
                             <span class="badge bg-warning">Parziale</span>
                             {% else %}

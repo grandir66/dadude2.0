@@ -206,6 +206,9 @@ async def customers_page(request: Request):
 @router.get("/customers/{customer_id}", response_class=HTMLResponse)
 async def customer_detail_page(request: Request, customer_id: str):
     """Dettaglio cliente"""
+    from ..services.websocket_hub import get_websocket_hub
+    import re
+    
     customer_service = get_customer_service()
     
     customer = customer_service.get_customer(customer_id)
@@ -216,7 +219,46 @@ async def customer_detail_page(request: Request, customer_id: str):
     credentials = customer_service.list_credentials(customer_id=customer_id, active_only=False)
     global_credentials = customer_service.list_global_credentials(active_only=True)
     devices = customer_service.list_device_assignments(customer_id=customer_id, active_only=False)
-    agents = customer_service.list_agents(customer_id=customer_id, active_only=False)
+    agents_raw = customer_service.list_agents(customer_id=customer_id, active_only=False)
+    
+    # Arricchisci agents con stato WebSocket real-time
+    hub = get_websocket_hub()
+    ws_connected_names = set()
+    
+    if hub and hub._connections:
+        for conn_id in hub._connections.keys():
+            match = re.match(r'^agent-(.+?)(?:-\d+)?$', conn_id)
+            if match:
+                ws_connected_names.add(match.group(1))
+    
+    # Converti e arricchisci
+    agents = []
+    connected_docker_agents = []
+    
+    for agent in agents_raw:
+        agent_dict = agent.model_dump() if hasattr(agent, 'model_dump') else dict(agent)
+        agent_type = agent_dict.get('agent_type', 'mikrotik')
+        agent_name = agent_dict.get('name', '')
+        
+        if agent_type == 'docker':
+            if agent_name in ws_connected_names:
+                agent_dict['status'] = 'online'
+                agent_dict['ws_connected'] = True
+                connected_docker_agents.append(agent_dict)
+            else:
+                agent_dict['ws_connected'] = False
+        
+        agents.append(agent_dict)
+    
+    # Per MikroTik, mostra se raggiungibili via Docker agent
+    for agent_dict in agents:
+        if agent_dict.get('agent_type', 'mikrotik') == 'mikrotik':
+            if connected_docker_agents:
+                bridge = connected_docker_agents[0]
+                agent_dict['status'] = 'reachable'
+                agent_dict['reachable_via'] = bridge.get('name', 'Docker Agent')
+            else:
+                agent_dict['status'] = 'unreachable'
     
     return templates.TemplateResponse("customer_detail.html", {
         "request": request,
