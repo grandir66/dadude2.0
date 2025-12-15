@@ -280,6 +280,25 @@ async def admin_exception_handler(request: Request, exc: Exception):
 # These endpoints proxy requests to the Agent API's WebSocket Hub
 import httpx
 
+def _get_agent_api_base_url() -> str:
+    """Get the base URL for Agent API, supporting both HTTP and HTTPS"""
+    # Read SSL settings from data/.env
+    ssl_enabled = False
+    env_path = Path("./data/.env")
+    if env_path.exists():
+        with open(env_path) as f:
+            for line in f:
+                if line.startswith("SSL_ENABLED="):
+                    ssl_enabled = line.strip().split("=")[1].lower() == "true"
+                    break
+    
+    protocol = "https" if ssl_enabled else "http"
+    return f"{protocol}://localhost:8000"
+
+def _get_httpx_client(**kwargs) -> httpx.AsyncClient:
+    """Get httpx client with SSL verification disabled for self-signed certs"""
+    return httpx.AsyncClient(verify=False, **kwargs)
+
 @admin_app.get("/api/v1/admin/agents/ws/connected", tags=["Admin"])
 async def admin_ws_connected():
     """
@@ -290,8 +309,9 @@ async def admin_ws_connected():
     """
     logger.info("Admin UI querying ws/connected via proxy")
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get("http://localhost:8000/api/v1/agents/ws/connected")
+        base_url = _get_agent_api_base_url()
+        async with _get_httpx_client(timeout=5.0) as client:
+            response = await client.get(f"{base_url}/api/v1/agents/ws/connected")
 
             if response.status_code == 200:
                 data = response.json()
@@ -315,10 +335,11 @@ async def admin_ws_command(agent_id: str, request: Request):
     """
     logger.info(f"Admin UI sending command to {agent_id} via proxy")
     try:
+        base_url = _get_agent_api_base_url()
         body = await request.json()
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with _get_httpx_client(timeout=30.0) as client:
             response = await client.post(
-                f"http://localhost:8000/api/v1/agents/ws/{agent_id}/command",
+                f"{base_url}/api/v1/agents/ws/{agent_id}/command",
                 json=body
             )
 
@@ -347,11 +368,12 @@ async def admin_exec_command(agent_db_id: str, request: Request):
     """
     logger.info(f"Admin UI executing command on agent {agent_db_id} via proxy")
     try:
+        base_url = _get_agent_api_base_url()
         # Forward query parameters from original request
         query_string = str(request.url.query)
-        url = f"http://localhost:8000/api/v1/agents/{agent_db_id}/exec?{query_string}"
+        url = f"{base_url}/api/v1/agents/{agent_db_id}/exec?{query_string}"
 
-        async with httpx.AsyncClient(timeout=90.0) as client:  # Longer timeout for command execution
+        async with _get_httpx_client(timeout=90.0) as client:  # Longer timeout for command execution
             response = await client.post(url)
 
             if response.status_code == 200:
@@ -379,8 +401,9 @@ async def admin_verify_version(agent_db_id: str):
     """
     logger.info(f"Admin UI verifying version for agent {agent_db_id} via proxy")
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"http://localhost:8000/api/v1/agents/{agent_db_id}/verify-version")
+        base_url = _get_agent_api_base_url()
+        async with _get_httpx_client(timeout=10.0) as client:
+            response = await client.get(f"{base_url}/api/v1/agents/{agent_db_id}/verify-version")
 
             if response.status_code == 200:
                 data = response.json()
@@ -411,13 +434,14 @@ async def admin_scan_customer_networks(agent_id: str, request: Request):
     """
     logger.info(f"Admin UI proxying network scan for agent {agent_id}")
     try:
+        base_url = _get_agent_api_base_url()
         query_string = str(request.url.query)
-        url = f"http://localhost:8000/api/v1/customers/agents/{agent_id}/scan-customer-networks"
+        url = f"{base_url}/api/v1/customers/agents/{agent_id}/scan-customer-networks"
         if query_string:
             url += f"?{query_string}"
         
         # Longer timeout for network scans (can take minutes)
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with _get_httpx_client(timeout=300.0) as client:
             response = await client.post(url)
             
             if response.status_code == 200:
@@ -448,12 +472,13 @@ async def admin_test_agent(agent_id: str, request: Request):
     """
     logger.info(f"Admin UI proxying agent test for {agent_id}")
     try:
+        base_url = _get_agent_api_base_url()
         query_string = str(request.url.query)
-        url = f"http://localhost:8000/api/v1/customers/agents/{agent_id}/test"
+        url = f"{base_url}/api/v1/customers/agents/{agent_id}/test"
         if query_string:
             url += f"?{query_string}"
         
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with _get_httpx_client(timeout=60.0) as client:
             response = await client.post(url)
             return JSONResponse(
                 status_code=response.status_code,
@@ -475,8 +500,9 @@ async def admin_trigger_agent_update(agent_db_id: str):
     """
     logger.info(f"Admin UI proxying trigger-update for agent {agent_db_id}")
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(f"http://localhost:8000/api/v1/agents/{agent_db_id}/trigger-update")
+        base_url = _get_agent_api_base_url()
+        async with _get_httpx_client(timeout=120.0) as client:
+            response = await client.post(f"{base_url}/api/v1/agents/{agent_db_id}/trigger-update")
             return JSONResponse(
                 status_code=response.status_code,
                 content=response.json() if response.content else {}
@@ -499,14 +525,15 @@ async def admin_auto_detect(request: Request):
     """
     logger.info("Admin UI proxying auto-detect request")
     try:
+        base_url = _get_agent_api_base_url()
         query_string = str(request.url.query)
-        url = f"http://localhost:8000/api/v1/inventory/auto-detect"
+        url = f"{base_url}/api/v1/inventory/auto-detect"
         if query_string:
             url += f"?{query_string}"
         
         body = await request.json()
         
-        async with httpx.AsyncClient(timeout=180.0) as client:
+        async with _get_httpx_client(timeout=180.0) as client:
             response = await client.post(url, json=body)
             
             if response.status_code == 200:
@@ -531,14 +558,15 @@ async def admin_auto_detect_batch(request: Request):
     """
     logger.info("Admin UI proxying batch auto-detect request")
     try:
+        base_url = _get_agent_api_base_url()
         query_string = str(request.url.query)
-        url = f"http://localhost:8000/api/v1/inventory/auto-detect-batch"
+        url = f"{base_url}/api/v1/inventory/auto-detect-batch"
         if query_string:
             url += f"?{query_string}"
         
         body = await request.json()
         
-        async with httpx.AsyncClient(timeout=600.0) as client:  # Longer for batch
+        async with _get_httpx_client(timeout=600.0) as client:  # Longer for batch
             response = await client.post(url, json=body)
             return JSONResponse(
                 status_code=response.status_code,
@@ -556,14 +584,15 @@ async def admin_probe_device(request: Request):
     """
     logger.info("Admin UI proxying probe request")
     try:
+        base_url = _get_agent_api_base_url()
         query_string = str(request.url.query)
-        url = f"http://localhost:8000/api/v1/inventory/probe"
+        url = f"{base_url}/api/v1/inventory/probe"
         if query_string:
             url += f"?{query_string}"
         
         body = await request.json()
         
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with _get_httpx_client(timeout=120.0) as client:
             response = await client.post(url, json=body)
             return JSONResponse(
                 status_code=response.status_code,
@@ -586,12 +615,13 @@ async def admin_list_customer_agents(customer_id: str, request: Request):
     This endpoint needs WebSocket Hub access to show real-time connection status.
     """
     try:
+        base_url = _get_agent_api_base_url()
         query_string = str(request.url.query)
-        url = f"http://localhost:8000/api/v1/customers/{customer_id}/agents"
+        url = f"{base_url}/api/v1/customers/{customer_id}/agents"
         if query_string:
             url += f"?{query_string}"
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with _get_httpx_client(timeout=30.0) as client:
             response = await client.get(url)
             return JSONResponse(
                 status_code=response.status_code,
