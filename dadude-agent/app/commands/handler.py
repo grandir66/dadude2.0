@@ -915,11 +915,23 @@ class CommandHandler:
     async def _nmap_network_scan(self, network: str, scan_type: str) -> list:
         """Scansione rete con nmap (asincrono per non bloccare heartbeat)"""
         try:
-            # Scan veloce per discovery
-            cmd = ["nmap", "-sn", "-n", network]
+            # Scan con multiple tecniche per massima discovery
+            # -sn = no port scan (solo discovery)
+            # -PE = ICMP echo ping
+            # -PP = ICMP timestamp ping  
+            # -PM = ICMP netmask ping
+            # -PS22,80,443,3389 = TCP SYN ping su porte comuni
+            # -PA80,443 = TCP ACK ping
+            # -PU53 = UDP ping
+            # --min-rate=100 = velocizza scan
+            cmd = ["nmap", "-sn", "-PE", "-PP", "-PS22,80,443,3389,8080", "-PA80,443", "-n", "--min-rate=100", network]
             
             if scan_type == "arp":
-                cmd = ["nmap", "-sn", "-PR", network]
+                # ARP scan - funziona solo su subnet locale
+                cmd = ["nmap", "-sn", "-PR", "--send-eth", network]
+            elif scan_type == "aggressive":
+                # Scan aggressivo con tutte le tecniche
+                cmd = ["nmap", "-sn", "-PE", "-PP", "-PM", "-PS21,22,23,25,80,443,445,3389,8080", "-PA80,443", "-PU53,161", "-n", "--min-rate=50", network]
             elif scan_type == "all":
                 cmd = ["nmap", "-sS", "-sV", "-O", "--top-ports", "100", network]
             
