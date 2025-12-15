@@ -575,8 +575,10 @@ async def list_customer_agents(
     """
     Lista le sonde assegnate a un cliente.
     Aggiunge informazioni real-time sullo stato WebSocket per agent Docker.
+    Per agent MikroTik, mostra se sono raggiungibili via un agent Docker connesso.
     """
     from ..services.websocket_hub import get_websocket_hub
+    import re
     
     service = get_customer_service()
     
@@ -589,35 +591,49 @@ async def list_customer_agents(
     
     # Arricchisci con stato WebSocket real-time
     hub = get_websocket_hub()
-    ws_connected = set()
     ws_connected_names = set()
+    connected_docker_agents = []  # Lista agent Docker connessi
     
     if hub and hub._connections:
         for conn_id in hub._connections.keys():
-            ws_connected.add(conn_id)
             # Estrai nome base (es: "agent-PX-OVH-51-1234" -> "PX-OVH-51")
-            import re
             match = re.match(r'^agent-(.+?)(?:-\d+)?$', conn_id)
             if match:
                 ws_connected_names.add(match.group(1))
     
-    # Converti in dict per poter modificare
+    # Prima passata: identifica agent Docker connessi
     result = []
     for agent in agents:
         agent_dict = agent.model_dump() if hasattr(agent, 'model_dump') else dict(agent)
-        
-        # Verifica se connesso via WebSocket
         agent_type = agent_dict.get('agent_type', 'mikrotik')
+        agent_name = agent_dict.get('name', '')
+        
         if agent_type == 'docker':
-            agent_name = agent_dict.get('name', '')
-            # Match per nome esatto
             if agent_name in ws_connected_names:
                 agent_dict['status'] = 'online'
                 agent_dict['ws_connected'] = True
+                connected_docker_agents.append(agent_dict)
             else:
                 agent_dict['ws_connected'] = False
         
         result.append(agent_dict)
+    
+    # Seconda passata: per agent MikroTik, verifica se raggiungibili via Docker agent
+    for agent_dict in result:
+        agent_type = agent_dict.get('agent_type', 'mikrotik')
+        
+        if agent_type == 'mikrotik':
+            # Gli agent MikroTik sono raggiungibili se c'è almeno un agent Docker connesso
+            # nello stesso cliente (possono fare query API/SSH al router)
+            if connected_docker_agents:
+                # Usa il primo agent Docker connesso come "ponte"
+                bridge_agent = connected_docker_agents[0]
+                agent_dict['status'] = 'reachable'
+                agent_dict['reachable_via'] = bridge_agent.get('name', 'Docker Agent')
+                agent_dict['reachable_via_id'] = bridge_agent.get('id')
+            else:
+                agent_dict['status'] = 'unreachable'
+                agent_dict['reachable_via'] = None
     
     return result
 
