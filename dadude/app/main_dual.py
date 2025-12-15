@@ -10,6 +10,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from .auth import AuthMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
@@ -22,7 +23,8 @@ from .services import get_dude_service, get_sync_service
 from .services.websocket_hub import get_websocket_hub
 from .routers import (
     devices, probes, alerts, webhook, system, customers,
-    import_export, dashboard, discovery, mikrotik, inventory, agents
+    import_export, dashboard, discovery, mikrotik, inventory, agents,
+    settings as settings_router
 )
 
 
@@ -259,6 +261,9 @@ admin_app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Auth Middleware per Admin UI (dopo CORS, prima delle route)
+admin_app.add_middleware(AuthMiddleware)
 
 # No middleware needed - we'll override the route directly below
 
@@ -616,6 +621,7 @@ admin_app.include_router(agents.router, prefix="/api/v1")
 
 # Dashboard (senza prefisso API)
 admin_app.include_router(dashboard.router)
+admin_app.include_router(settings_router.router, prefix="/api/v1")
 
 # Monta directory static se esiste
 static_dir = os.path.join(os.path.dirname(__file__), "static")

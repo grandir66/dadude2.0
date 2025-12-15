@@ -55,6 +55,9 @@
                             <a href="/customers/{{ customer.id }}" class="btn btn-outline-primary" title="Visualizza">
                                 <i class="bi bi-eye"></i>
                             </a>
+                            <button class="btn btn-outline-secondary" onclick="showEditCustomerModal('{{ customer.id }}', '{{ customer.code }}', '{{ customer.name }}', '{{ customer.description or '' }}', {{ 'true' if customer.active else 'false' }})" title="Modifica">
+                                <i class="bi bi-pencil"></i>
+                            </button>
                             <button class="btn btn-outline-danger" onclick="deleteCustomer('{{ customer.id }}', '{{ customer.name }}')" title="Elimina">
                                 <i class="bi bi-trash"></i>
                             </button>
@@ -121,6 +124,50 @@
         </div>
     </div>
 </div>
+
+<!-- Modal Modifica Cliente -->
+<div class="modal fade" id="editCustomerModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil"></i> Modifica Cliente</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editCustomerForm">
+                <input type="hidden" id="editCustomerId" name="customer_id">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Codice Cliente</label>
+                        <input type="text" class="form-control" id="editCustomerCode" name="code" 
+                               pattern="[A-Za-z0-9_-]+">
+                        <small class="text-muted">Solo lettere, numeri, _ e -</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nome *</label>
+                        <input type="text" class="form-control" id="editCustomerName" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Descrizione</label>
+                        <textarea class="form-control" id="editCustomerDescription" name="description" rows="2"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Stato</label>
+                        <select class="form-select" id="editCustomerActive" name="active">
+                            <option value="true">Attivo</option>
+                            <option value="false">Disattivo</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> Salva Modifiche
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -146,6 +193,48 @@ document.getElementById('newCustomerForm').addEventListener('submit', async (e) 
         }
     } catch (e) {
         alert('Errore di connessione');
+    }
+});
+
+// Mostra modal modifica cliente
+function showEditCustomerModal(customerId, code, name, description, active) {
+    document.getElementById('editCustomerId').value = customerId;
+    document.getElementById('editCustomerCode').value = code;
+    document.getElementById('editCustomerName').value = name;
+    document.getElementById('editCustomerDescription').value = description;
+    document.getElementById('editCustomerActive').value = active ? 'true' : 'false';
+    new bootstrap.Modal(document.getElementById('editCustomerModal')).show();
+}
+
+// Submit form modifica cliente
+document.getElementById('editCustomerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const customerId = document.getElementById('editCustomerId').value;
+    
+    const data = {
+        code: document.getElementById('editCustomerCode').value,
+        name: document.getElementById('editCustomerName').value,
+        description: document.getElementById('editCustomerDescription').value || null,
+        active: document.getElementById('editCustomerActive').value === 'true',
+    };
+    
+    try {
+        const response = await fetch(`/api/v1/customers/${customerId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('editCustomerModal')).hide();
+            alert('✅ Cliente aggiornato con successo');
+            location.reload();
+        } else {
+            const error = await response.json();
+            alert('❌ Errore: ' + (error.detail || 'Aggiornamento fallito'));
+        }
+    } catch (e) {
+        alert('❌ Errore: ' + e.message);
     }
 });
 

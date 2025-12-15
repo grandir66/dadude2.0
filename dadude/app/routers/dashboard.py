@@ -14,6 +14,10 @@ from ..config import get_settings
 from ..services import get_dude_service, get_sync_service, get_alert_service
 from ..services.customer_service import get_customer_service
 from ..services.settings_service import get_settings_service
+from ..auth import (
+    is_auth_enabled, verify_password, get_admin_username,
+    create_session, destroy_session
+)
 
 router = APIRouter(tags=["Dashboard"])
 
@@ -142,6 +146,68 @@ def get_dashboard_data():
 
 # ==========================================
 # DASHBOARD PAGES
+# ==========================================
+
+# ==========================================
+# LOGIN ROUTES
+# ==========================================
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, error: Optional[str] = None):
+    """Pagina di login"""
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": error,
+        "username": get_admin_username(),
+    })
+
+
+@router.post("/login")
+async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+    """Processa il login"""
+    admin_username = get_admin_username()
+    
+    if username != admin_username:
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Username non valido",
+            "username": username,
+        })
+    
+    if not verify_password(password):
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Password non valida",
+            "username": username,
+        })
+    
+    # Login riuscito, crea sessione
+    session_token = create_session(username)
+    response = RedirectResponse(url="/", status_code=302)
+    response.set_cookie(
+        key="dadude_session",
+        value=session_token,
+        httponly=True,
+        max_age=86400 * 7,  # 7 giorni
+        samesite="lax"
+    )
+    return response
+
+
+@router.get("/logout")
+async def logout(request: Request):
+    """Logout e distrugge la sessione"""
+    session_token = request.cookies.get("dadude_session")
+    if session_token:
+        destroy_session(session_token)
+    
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie("dadude_session")
+    return response
+
+
+# ==========================================
+# DASHBOARD ROUTES
 # ==========================================
 
 @router.get("/", response_class=HTMLResponse)
@@ -320,8 +386,20 @@ async def agents_page(request: Request):
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
     """Pagina configurazione"""
+    import os
     settings = get_settings()
     dude = get_dude_service()
+    
+    # Leggi impostazioni extra da .env
+    env_vars = {}
+    env_path = ".env"
+    if os.path.exists(env_path):
+        with open(env_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    env_vars[key.strip()] = value.strip().strip('"').strip("'")
     
     return templates.TemplateResponse("settings.html", {
         "request": request,
@@ -329,6 +407,11 @@ async def settings_page(request: Request):
         "title": "Configurazione",
         "settings": settings,
         "dude_connected": dude.is_connected,
+        "ssl_enabled": env_vars.get("SSL_ENABLED", "false").lower() == "true",
+        "ssl_cert_path": env_vars.get("SSL_CERT_PATH", "/app/certs/server.crt"),
+        "ssl_key_path": env_vars.get("SSL_KEY_PATH", "/app/certs/server.key"),
+        "auth_enabled": env_vars.get("AUTH_ENABLED", "false").lower() == "true",
+        "admin_username": env_vars.get("ADMIN_USERNAME", "admin"),
     })
 
 

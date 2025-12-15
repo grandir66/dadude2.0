@@ -204,6 +204,79 @@
     </div>
 </div>
 
+<!-- Modal Modifica Agent -->
+<div class="modal fade" id="editAgentModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil"></i> Modifica Agent</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="editAgentForm">
+                <input type="hidden" id="editAgentId" name="agent_id">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Nome Agent</label>
+                            <input type="text" class="form-control" id="editAgentName" name="name" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Tipo</label>
+                            <select class="form-select" id="editAgentType" name="agent_type" disabled>
+                                <option value="docker">Docker</option>
+                                <option value="mikrotik">MikroTik</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Indirizzo IP</label>
+                            <input type="text" class="form-control" id="editAgentAddress" name="address">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Porta</label>
+                            <input type="number" class="form-control" id="editAgentPort" name="port">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Sede/Ubicazione</label>
+                            <input type="text" class="form-control" id="editAgentLocation" name="location" placeholder="es: Ufficio Milano">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Nome Sito</label>
+                            <input type="text" class="form-control" id="editAgentSiteName" name="site_name" placeholder="es: Datacenter 1">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">DNS Server (per reverse lookup)</label>
+                            <input type="text" class="form-control" id="editAgentDns" name="dns_server" placeholder="192.168.1.1">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Stato</label>
+                            <select class="form-select" id="editAgentActive" name="active">
+                                <option value="true">Attivo</option>
+                                <option value="false">Disattivo</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Note</label>
+                        <textarea class="form-control" id="editAgentNotes" name="notes" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-lg"></i> Salva Modifiche
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Modal Console Remota -->
 <div class="modal fade" id="consoleModal" tabindex="-1">
     <div class="modal-dialog modal-xl">
@@ -534,6 +607,9 @@ async function loadActiveAgents() {
                                     <button class="btn btn-outline-warning" onclick="restartAgent('${a.id}')" title="Riavvia">
                                         <i class="bi bi-arrow-clockwise"></i>
                                     </button>
+                                    <button class="btn btn-outline-secondary" onclick="showEditAgentModal('${a.id}')" title="Modifica">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
                                     <button class="btn btn-outline-danger" onclick="deleteAgent('${a.id}', '${a.name}')" title="Elimina">
                                         <i class="bi bi-trash"></i>
                                     </button>
@@ -672,6 +748,69 @@ async function rejectAgent(agentId) {
         alert('Errore: ' + e.message);
     }
 }
+
+// Mostra modal modifica agent
+async function showEditAgentModal(agentId) {
+    try {
+        // Carica i dati dell'agent
+        const response = await fetch(`/api/v1/customers/agents/${agentId}`);
+        if (!response.ok) throw new Error('Agent non trovato');
+        const agent = await response.json();
+        
+        // Popola il form
+        document.getElementById('editAgentId').value = agent.id;
+        document.getElementById('editAgentName').value = agent.name || '';
+        document.getElementById('editAgentType').value = agent.agent_type || 'mikrotik';
+        document.getElementById('editAgentAddress').value = agent.address || '';
+        document.getElementById('editAgentPort').value = agent.port || (agent.agent_type === 'docker' ? 8080 : 8728);
+        document.getElementById('editAgentLocation').value = agent.location || '';
+        document.getElementById('editAgentSiteName').value = agent.site_name || '';
+        document.getElementById('editAgentDns').value = agent.dns_server || '';
+        document.getElementById('editAgentActive').value = agent.active ? 'true' : 'false';
+        document.getElementById('editAgentNotes').value = agent.notes || '';
+        
+        // Mostra il modal
+        new bootstrap.Modal(document.getElementById('editAgentModal')).show();
+    } catch (e) {
+        alert('❌ Errore: ' + e.message);
+    }
+}
+
+// Submit form modifica agent
+document.getElementById('editAgentForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const agentId = document.getElementById('editAgentId').value;
+    
+    const data = {
+        name: document.getElementById('editAgentName').value,
+        address: document.getElementById('editAgentAddress').value,
+        port: parseInt(document.getElementById('editAgentPort').value),
+        location: document.getElementById('editAgentLocation').value || null,
+        site_name: document.getElementById('editAgentSiteName').value || null,
+        dns_server: document.getElementById('editAgentDns').value || null,
+        active: document.getElementById('editAgentActive').value === 'true',
+        notes: document.getElementById('editAgentNotes').value || null,
+    };
+    
+    try {
+        const response = await fetch(`/api/v1/customers/agents/${agentId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('editAgentModal')).hide();
+            alert('✅ Agent aggiornato con successo');
+            loadAgents();
+        } else {
+            const error = await response.json();
+            alert('❌ Errore: ' + (error.detail || 'Aggiornamento fallito'));
+        }
+    } catch (e) {
+        alert('❌ Errore: ' + e.message);
+    }
+});
 
 async function deleteAgent(agentId, agentName) {
     if (!confirm(`⚠️ Eliminare l'agent "${agentName}"?\n\nL'agent verrà rimosso dal sistema.`)) {
