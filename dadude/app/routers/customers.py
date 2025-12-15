@@ -567,14 +567,17 @@ def _count_by_field(items: List, field: str) -> dict:
 # AGENT ASSIGNMENTS (SONDE)
 # ==========================================
 
-@router.get("/{customer_id}/agents", response_model=List[AgentAssignmentSafe])
+@router.get("/{customer_id}/agents")
 async def list_customer_agents(
     customer_id: str,
     active_only: bool = Query(True),
 ):
     """
     Lista le sonde assegnate a un cliente.
+    Aggiunge informazioni real-time sullo stato WebSocket per agent Docker.
     """
+    from ..services.websocket_hub import get_websocket_hub
+    
     service = get_customer_service()
     
     # Verifica cliente esiste
@@ -582,7 +585,41 @@ async def list_customer_agents(
     if not customer:
         raise HTTPException(status_code=404, detail=f"Cliente {customer_id} non trovato")
     
-    return service.list_agents(customer_id=customer_id, active_only=active_only)
+    agents = service.list_agents(customer_id=customer_id, active_only=active_only)
+    
+    # Arricchisci con stato WebSocket real-time
+    hub = get_websocket_hub()
+    ws_connected = set()
+    ws_connected_names = set()
+    
+    if hub and hub._connections:
+        for conn_id in hub._connections.keys():
+            ws_connected.add(conn_id)
+            # Estrai nome base (es: "agent-PX-OVH-51-1234" -> "PX-OVH-51")
+            import re
+            match = re.match(r'^agent-(.+?)(?:-\d+)?$', conn_id)
+            if match:
+                ws_connected_names.add(match.group(1))
+    
+    # Converti in dict per poter modificare
+    result = []
+    for agent in agents:
+        agent_dict = agent.model_dump() if hasattr(agent, 'model_dump') else dict(agent)
+        
+        # Verifica se connesso via WebSocket
+        agent_type = agent_dict.get('agent_type', 'mikrotik')
+        if agent_type == 'docker':
+            agent_name = agent_dict.get('name', '')
+            # Match per nome esatto
+            if agent_name in ws_connected_names:
+                agent_dict['status'] = 'online'
+                agent_dict['ws_connected'] = True
+            else:
+                agent_dict['ws_connected'] = False
+        
+        result.append(agent_dict)
+    
+    return result
 
 
 @router.post("/{customer_id}/agents", response_model=AgentAssignment, status_code=201)
