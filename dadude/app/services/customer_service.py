@@ -1206,13 +1206,9 @@ class CustomerService:
             if agent:
                 return self._to_agent_safe(agent)
             
-            # Cerca per nome parziale (l'agent_unique_id contiene il nome)
-            all_agents = session.query(AgentAssignmentDB).filter(
-                AgentAssignmentDB.active == True
-            ).all()
-            for a in all_agents:
-                if a.name and a.name in agent_unique_id:
-                    return self._to_agent_safe(a)
+            # NON usare match parziale - troppi falsi positivi
+            # "OVH" in "agent-PX-OVH-51" = True (sbagliato!)
+            # L'agent deve essere identificato solo per ID esatto o nome esatto
             
             return None
             
