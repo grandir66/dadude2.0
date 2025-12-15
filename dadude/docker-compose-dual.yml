@@ -10,7 +10,7 @@ services:
   dadude:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dual
     container_name: dadude
     restart: unless-stopped
 
