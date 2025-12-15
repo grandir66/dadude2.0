@@ -418,14 +418,21 @@ async function loadActiveAgents() {
 
         // Ottieni lista agent connessi via WebSocket (real-time)
         let wsConnected = new Set();
+        let wsConnectedByName = new Set();
         try {
             const wsResp = await fetch('/api/v1/admin/agents/ws/connected');
             if (wsResp.ok) {
                 const wsData = await wsResp.json();
                 wsData.agents.forEach(wsAgent => {
                     wsConnected.add(wsAgent.agent_id);
+                    // Extract name from agent_id (format: "agent-{name}" or "agent-{name}-{number}")
+                    const match = wsAgent.agent_id.match(/^agent-(.+?)(?:-\d+)?$/);
+                    if (match) {
+                        wsConnectedByName.add(match[1]);
+                    }
                 });
                 console.log(`WebSocket connected agents: ${wsConnected.size}`, Array.from(wsConnected));
+                console.log(`WebSocket connected names: ${wsConnectedByName.size}`, Array.from(wsConnectedByName));
             }
         } catch (e) {
             console.warn('Could not fetch WebSocket status:', e);
@@ -433,7 +440,8 @@ async function loadActiveAgents() {
 
         // Aggiorna stato connessione real-time per ogni agent
         allAgents.forEach(a => {
-            a.ws_connected = wsConnected.has(a.id);
+            // Match by name (agent_id format is "agent-{name}" or "agent-{name}-{number}")
+            a.ws_connected = wsConnectedByName.has(a.name);
         });
 
         document.getElementById('active-count').textContent = allAgents.length;
