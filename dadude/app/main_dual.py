@@ -8,7 +8,7 @@ Separazione per sicurezza:
 """
 import asyncio
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -186,8 +186,12 @@ async def agent_exception_handler(request: Request, exc: Exception):
         content={"error": "Internal server error", "detail": str(exc)},
     )
 
-# Registra SOLO router agents (con tutti i suoi endpoint)
+# Registra router agents (WebSocket connections, registration, commands)
 agent_app.include_router(agents.router, prefix="/api/v1")
+
+# Registra anche customers router per endpoint che usano WebSocket Hub
+# (scan-customer-networks, test, etc.)
+agent_app.include_router(customers.router, prefix="/api/v1")
 
 # Health check per agent
 @agent_app.get("/health", tags=["Health"])
@@ -382,6 +386,95 @@ async def admin_verify_version(agent_db_id: str):
                 )
     except Exception as e:
         logger.error(f"Verify-version proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# PROXY: Network Scan (uses WebSocket Hub)
+# ==========================================
+
+@admin_app.post("/api/v1/customers/agents/{agent_id}/scan-customer-networks", tags=["Admin"])
+async def admin_scan_customer_networks(agent_id: str, request: Request):
+    """
+    Proxy network scan to Agent API (port 8000).
+    
+    This endpoint requires WebSocket Hub access, which is only available
+    in the Agent API process.
+    """
+    logger.info(f"Admin UI proxying network scan for agent {agent_id}")
+    try:
+        query_string = str(request.url.query)
+        url = f"http://localhost:8000/api/v1/customers/agents/{agent_id}/scan-customer-networks"
+        if query_string:
+            url += f"?{query_string}"
+        
+        # Longer timeout for network scans (can take minutes)
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(url)
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Network scan proxy successful for agent {agent_id}")
+                return data
+            else:
+                logger.error(f"Network scan proxy failed: {response.status_code}")
+                return JSONResponse(
+                    status_code=response.status_code,
+                    content=response.json() if response.content else {"error": "Proxy failed"}
+                )
+    except httpx.ReadTimeout:
+        logger.error(f"Network scan proxy timeout for agent {agent_id}")
+        return JSONResponse(
+            status_code=504,
+            content={"error": "Scan timeout - the network scan took too long"}
+        )
+    except Exception as e:
+        logger.error(f"Network scan proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_app.post("/api/v1/customers/agents/{agent_id}/test", tags=["Admin"])
+async def admin_test_agent(agent_id: str, request: Request):
+    """
+    Proxy agent test to Agent API (port 8000).
+    """
+    logger.info(f"Admin UI proxying agent test for {agent_id}")
+    try:
+        query_string = str(request.url.query)
+        url = f"http://localhost:8000/api/v1/customers/agents/{agent_id}/test"
+        if query_string:
+            url += f"?{query_string}"
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url)
+            return JSONResponse(
+                status_code=response.status_code,
+                content=response.json() if response.content else {}
+            )
+    except Exception as e:
+        logger.error(f"Agent test proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# PROXY: Agent trigger-update (uses WebSocket)  
+# ==========================================
+
+@admin_app.post("/api/v1/agents/{agent_db_id}/trigger-update", tags=["Admin"])
+async def admin_trigger_agent_update(agent_db_id: str):
+    """
+    Proxy trigger-update to Agent API (port 8000).
+    """
+    logger.info(f"Admin UI proxying trigger-update for agent {agent_db_id}")
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(f"http://localhost:8000/api/v1/agents/{agent_db_id}/trigger-update")
+            return JSONResponse(
+                status_code=response.status_code,
+                content=response.json() if response.content else {}
+            )
+    except Exception as e:
+        logger.error(f"Trigger-update proxy error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
