@@ -396,16 +396,16 @@ async function loadPendingAgents() {
 
 async function loadActiveAgents() {
     const container = document.getElementById('active-agents');
-    
+
     try {
         // Carica tutti gli agent assegnati dai clienti
         const response = await fetch('/api/v1/customers');
         if (!response.ok) throw new Error('Failed to load customers');
-        
+
         const data = await response.json();
         const customers = data.customers || data; // Supporta entrambi i formati
         let allAgents = [];
-        
+
         for (const customer of customers) {
             const agentsResp = await fetch(`/api/v1/customers/${customer.id}/agents`);
             if (agentsResp.ok) {
@@ -415,7 +415,27 @@ async function loadActiveAgents() {
                 });
             }
         }
-        
+
+        // Ottieni lista agent connessi via WebSocket (real-time)
+        let wsConnected = new Set();
+        try {
+            const wsResp = await fetch('/api/v1/admin/agents/ws/connected');
+            if (wsResp.ok) {
+                const wsData = await wsResp.json();
+                wsData.agents.forEach(wsAgent => {
+                    wsConnected.add(wsAgent.agent_id);
+                });
+                console.log(`WebSocket connected agents: ${wsConnected.size}`, Array.from(wsConnected));
+            }
+        } catch (e) {
+            console.warn('Could not fetch WebSocket status:', e);
+        }
+
+        // Aggiorna stato connessione real-time per ogni agent
+        allAgents.forEach(a => {
+            a.ws_connected = wsConnected.has(a.id);
+        });
+
         document.getElementById('active-count').textContent = allAgents.length;
         
         if (allAgents.length === 0) {
@@ -449,8 +469,8 @@ async function loadActiveAgents() {
                             <td><code>${a.address}</code></td>
                             <td><span class="badge ${a.agent_type === 'docker' ? 'bg-info' : 'bg-primary'}">${a.agent_type || 'mikrotik'}</span></td>
                             <td>
-                                <span class="badge ${a.active ? 'bg-success' : 'bg-secondary'}">
-                                    ${a.active ? 'Attivo' : 'Inattivo'}
+                                <span class="badge ${a.ws_connected ? 'bg-success' : 'bg-secondary'}">
+                                    ${a.ws_connected ? '🔌 Connesso' : '⚫ Disconnesso'}
                                 </span>
                             </td>
                             <td>${a.version || 'N/A'}</td>
