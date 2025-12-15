@@ -166,23 +166,28 @@ class AgentWebSocketClient:
         return self._state == ConnectionState.CONNECTED
     
     def _create_ssl_context(self) -> Optional[ssl.SSLContext]:
-        """Crea SSL context per mTLS"""
-        if not self.ca_cert_path:
-            # Nessun mTLS, usa connessione senza verifica
+        """Crea SSL context per mTLS o connessione HTTPS semplice"""
+        # Controlla se il server usa HTTPS/WSS
+        is_secure = self.server_url.startswith("https://") or self.server_url.startswith("wss://")
+        
+        if not is_secure and not self.ca_cert_path:
+            # Connessione non sicura (ws://)
             return None
         
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         
-        # Carica CA per verificare server
-        if Path(self.ca_cert_path).exists():
+        # Se abbiamo un CA cert, usiamolo per verificare
+        if self.ca_cert_path and Path(self.ca_cert_path).exists():
             context.load_verify_locations(self.ca_cert_path)
             context.verify_mode = ssl.CERT_REQUIRED
+            logger.info("SSL verification enabled with CA certificate")
         else:
-            # Fallback senza verifica
+            # Connessione HTTPS senza verifica (self-signed cert)
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
+            logger.info("SSL enabled without certificate verification (self-signed)")
         
-        # Carica certificato client
+        # Carica certificato client per mTLS (opzionale)
         if self.client_cert_path and self.client_key_path:
             if Path(self.client_cert_path).exists() and Path(self.client_key_path).exists():
                 context.load_cert_chain(
