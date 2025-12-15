@@ -193,7 +193,7 @@ async def alerts_page(request: Request):
 async def customers_page(request: Request):
     """Pagina clienti"""
     customer_service = get_customer_service()
-    customers = customer_service.list_customers(active_only=False, limit=500)
+    customers = customer_service.list_customers(active_only=True, limit=500)
     
     return templates.TemplateResponse("customers.html", {
         "request": request,
