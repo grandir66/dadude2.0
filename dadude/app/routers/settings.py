@@ -269,18 +269,34 @@ async def update_auth_settings(settings: AuthSettings):
 @router.post("/restart")
 async def restart_service():
     """
-    Riavvia il servizio DaDude (richiede docker)
+    Riavvia il servizio DaDude via Docker socket
     """
     try:
-        # Verifica se siamo in Docker
-        if os.path.exists("/.dockerenv"):
-            # Non possiamo riavviare noi stessi direttamente
+        # Verifica se il socket Docker è disponibile
+        if os.path.exists("/var/run/docker.sock"):
+            # Ottieni il nome del container corrente
+            hostname = os.environ.get("HOSTNAME", "dadude")
+            
+            # Usa docker per riavviare il container
+            # Il restart viene eseguito in background perché interromperà questo processo
+            result = subprocess.Popen(
+                ["docker", "restart", hostname],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            
+            return {
+                "success": True,
+                "message": f"Riavvio container {hostname} in corso... La pagina si ricaricherà automaticamente."
+            }
+        elif os.path.exists("/.dockerenv"):
+            # Siamo in Docker ma senza socket
             return {
                 "success": False,
-                "message": "Esegui manualmente: docker compose restart dadude"
+                "message": "Socket Docker non disponibile. Esegui: docker compose restart dadude"
             }
         else:
-            # Prova a riavviare via systemctl
+            # Non in Docker, prova systemctl
             result = subprocess.run(
                 ["systemctl", "restart", "dadude"],
                 capture_output=True, text=True, timeout=30
@@ -290,5 +306,6 @@ async def restart_service():
             else:
                 return {"success": False, "message": result.stderr}
     except Exception as e:
+        logger.error(f"Restart failed: {e}")
         return {"success": False, "message": str(e)}
 

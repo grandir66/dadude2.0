@@ -53,6 +53,7 @@ services:
     volumes:
       - dadude_data:/app/data
       - dadude_logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock  # Per auto-restart
 
     networks:
       - dadude_network
