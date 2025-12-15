@@ -359,10 +359,16 @@
                         </td>
                         <td>{{ agent.last_seen.strftime('%d/%m %H:%M') if agent.last_seen else '-' }}</td>
                         <td>
+                            {% set agent_type = agent.agent_type if agent.agent_type else 'mikrotik' %}
                             <div class="btn-group btn-group-sm" role="group">
                                 <button class="btn btn-outline-primary" onclick="testAgent('{{ agent.id }}')" title="Test connessione">
                                     <i class="bi bi-wifi"></i>
                                 </button>
+                                {% if agent_type == 'mikrotik' %}
+                                <a href="/customers/{{ customer.id }}/agents/{{ agent.id }}/mikrotik" class="btn btn-outline-info" title="Gestione MikroTik">
+                                    <i class="bi bi-router"></i>
+                                </a>
+                                {% endif %}
                                 <button class="btn btn-outline-danger" onclick="unlinkAgent('{{ agent.id }}', '{{ agent.name }}')" title="Rimuovi dal cliente">
                                     <i class="bi bi-x-lg"></i>
                                 </button>
