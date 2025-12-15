@@ -274,43 +274,39 @@ admin_app.include_router(inventory.router, prefix="/api/v1")
 admin_app.include_router(import_export.router, prefix="/api/v1")
 admin_app.include_router(discovery.router, prefix="/api/v1")
 
-# Override WebSocket Hub endpoint per Admin UI - proxy to Agent API
-# MUST be defined BEFORE including agents.router to take precedence
-@admin_app.get("/api/v1/agents/ws/connected", tags=["Agents"])
-async def admin_list_connected_agents():
-    """
-    Lista agent connessi via WebSocket.
-
-    NOTA: Admin UI runs in separate process, so it proxies this request
-    to Agent API's WebSocket Hub (port 8000) to get real connection data.
-    """
-    import httpx
-
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            # Query Agent API's WebSocket Hub
-            response = await client.get("http://localhost:8000/api/v1/agents/ws/connected")
-
-            if response.status_code == 200:
-                return response.json()
-            else:
-                logger.error(f"Failed to proxy ws/connected: {response.status_code}")
-                return {
-                    "count": 0,
-                    "agents": [],
-                    "error": f"Agent API returned {response.status_code}"
-                }
-    except Exception as e:
-        logger.error(f"Failed to proxy ws/connected to Agent API: {e}")
-        return {
-            "count": 0,
-            "agents": [],
-            "error": str(e)
-        }
-
 # IMPORTANTE: Include anche agents router per endpoints di management
-# (pending, outdated, approve, etc.) ma NON per WebSocket/register
+# (pending, outdated, approve, etc.)
 admin_app.include_router(agents.router, prefix="/api/v1")
+
+# Override WebSocket Hub endpoint for Admin UI
+# Use middleware to intercept and proxy the request
+import httpx
+from starlette.responses import JSONResponse
+
+@admin_app.middleware("http")
+async def proxy_ws_connected_middleware(request: Request, call_next):
+    """
+    Middleware to proxy /api/v1/agents/ws/connected requests to Agent API.
+
+    This is necessary because Admin UI and Agent API run in separate processes,
+    so they have separate WebSocket Hub instances.
+    """
+    if request.url.path == "/api/v1/agents/ws/connected" and request.method == "GET":
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get("http://localhost:8000/api/v1/agents/ws/connected")
+
+                if response.status_code == 200:
+                    return JSONResponse(content=response.json())
+                else:
+                    logger.error(f"Proxy to Agent API failed: {response.status_code}")
+                    return JSONResponse(content={"count": 0, "agents": [], "error": f"Agent API returned {response.status_code}"})
+        except Exception as e:
+            logger.error(f"Failed to proxy ws/connected: {e}")
+            return JSONResponse(content={"count": 0, "agents": [], "error": str(e)})
+
+    # Pass through all other requests
+    return await call_next(request)
 
 # Dashboard (senza prefisso API)
 admin_app.include_router(dashboard.router)
