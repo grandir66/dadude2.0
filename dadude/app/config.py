@@ -45,9 +45,12 @@ class Settings(BaseSettings):
     encryption_key: Optional[str] = Field(default=None, description="Master encryption key for credentials")
     
     class Config:
-        env_file = ".env"
+        # Usa .env nella directory data (persistente)
+        env_file = "./data/.env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        # Permetti override da variabili ambiente per compatibilità docker-compose
+        extra = "ignore"
 
 
 @lru_cache()

@@ -11,20 +11,33 @@ from loguru import logger
 class SettingsService:
     """Servizio per gestione configurazione .env"""
     
-    def __init__(self, env_file: str = ".env"):
+    def __init__(self, env_file: str = "./data/.env"):
         self.env_file = Path(env_file)
         self._ensure_env_file()
     
     def _ensure_env_file(self):
-        """Crea .env se non esiste"""
+        """Crea .env se non esiste, migra da posizione precedente"""
+        # Crea directory se non esiste
+        self.env_file.parent.mkdir(parents=True, exist_ok=True)
+        
         if not self.env_file.exists():
+            import shutil
+            
+            # Prova a migrare da vecchia posizione (.env nella root)
+            old_env = Path(".env")
+            if old_env.exists():
+                shutil.copy(old_env, self.env_file)
+                logger.info(f"Migrated .env from {old_env} to {self.env_file}")
+                return
+            
+            # Oppure copia da .env.example
             example_file = Path(".env.example")
             if example_file.exists():
-                import shutil
                 shutil.copy(example_file, self.env_file)
                 logger.info("Created .env from .env.example")
             else:
                 self.env_file.touch()
+                logger.info(f"Created empty .env at {self.env_file}")
     
     def read_env(self) -> Dict[str, str]:
         """Legge tutte le variabili dal file .env"""

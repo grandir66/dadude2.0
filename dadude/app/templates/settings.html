@@ -131,11 +131,11 @@
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Certificato</label>
-                    <input type="text" class="form-control" id="sslCertPath" value="{{ ssl_cert_path or '/app/certs/server.crt' }}" readonly>
+                    <input type="text" class="form-control" id="sslCertPath" value="{{ ssl_cert_path or '/app/data/certs/server.crt' }}" readonly>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Chiave Privata</label>
-                    <input type="text" class="form-control" id="sslKeyPath" value="{{ ssl_key_path or '/app/certs/server.key' }}" readonly>
+                    <input type="text" class="form-control" id="sslKeyPath" value="{{ ssl_key_path or '/app/data/certs/server.key' }}" readonly>
                 </div>
                 <div class="d-flex gap-2 flex-wrap">
                     <button class="btn btn-warning" onclick="generateSSLCertificate()">

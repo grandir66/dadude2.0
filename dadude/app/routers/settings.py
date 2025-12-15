@@ -103,8 +103,8 @@ async def get_current_settings():
         },
         "ssl": {
             "enabled": env_vars.get("SSL_ENABLED", "false").lower() == "true",
-            "cert_path": env_vars.get("SSL_CERT_PATH", "/app/certs/server.crt"),
-            "key_path": env_vars.get("SSL_KEY_PATH", "/app/certs/server.key"),
+            "cert_path": env_vars.get("SSL_CERT_PATH", "/app/data/certs/server.crt"),
+            "key_path": env_vars.get("SSL_KEY_PATH", "/app/data/certs/server.key"),
         },
         "auth": {
             "enabled": env_vars.get("AUTH_ENABLED", "false").lower() == "true",
@@ -173,7 +173,7 @@ async def generate_ssl_certificate(
     """
     Genera un certificato SSL autofirmato
     """
-    cert_dir = "/app/certs"
+    cert_dir = "/app/data/certs"
     os.makedirs(cert_dir, exist_ok=True)
     
     cert_path = os.path.join(cert_dir, "server.crt")

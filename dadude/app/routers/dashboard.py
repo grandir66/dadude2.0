@@ -408,8 +408,8 @@ async def settings_page(request: Request):
         "settings": settings,
         "dude_connected": dude.is_connected,
         "ssl_enabled": env_vars.get("SSL_ENABLED", "false").lower() == "true",
-        "ssl_cert_path": env_vars.get("SSL_CERT_PATH", "/app/certs/server.crt"),
-        "ssl_key_path": env_vars.get("SSL_KEY_PATH", "/app/certs/server.key"),
+        "ssl_cert_path": env_vars.get("SSL_CERT_PATH", "/app/data/certs/server.crt"),
+        "ssl_key_path": env_vars.get("SSL_KEY_PATH", "/app/data/certs/server.key"),
         "auth_enabled": env_vars.get("AUTH_ENABLED", "false").lower() == "true",
         "admin_username": env_vars.get("ADMIN_USERNAME", "admin"),
     })
