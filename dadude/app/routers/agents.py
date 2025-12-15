@@ -1163,8 +1163,10 @@ async def list_outdated_agents():
     session = get_session(engine)
     
     try:
+        # Solo agent Docker possono essere aggiornati (non MikroTik)
         agents = session.query(AgentAssignment).filter(
-            AgentAssignment.active == True
+            AgentAssignment.active == True,
+            AgentAssignment.agent_type == "docker"
         ).all()
         
         outdated = []
@@ -1175,6 +1177,7 @@ async def list_outdated_agents():
                     "id": agent.id,
                     "name": agent.name,
                     "address": agent.address,
+                    "agent_type": agent.agent_type,
                     "current_version": agent_version,
                     "latest_version": latest_agent_version,
                     "customer_id": agent.customer_id,

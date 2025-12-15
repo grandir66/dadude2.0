@@ -439,9 +439,30 @@ async function loadActiveAgents() {
         }
 
         // Aggiorna stato connessione real-time per ogni agent
+        // Prima identifica i Docker agents connessi per ogni cliente
+        const connectedDockerByCustomer = {};
         allAgents.forEach(a => {
-            // Match by name (agent_id format is "agent-{name}" or "agent-{name}-{number}")
-            a.ws_connected = wsConnectedByName.has(a.name);
+            if (a.agent_type === 'docker' && wsConnectedByName.has(a.name)) {
+                a.ws_connected = true;
+                if (!connectedDockerByCustomer[a.customer_id]) {
+                    connectedDockerByCustomer[a.customer_id] = a.name;
+                }
+            } else if (a.agent_type === 'docker') {
+                a.ws_connected = false;
+            }
+        });
+        
+        // Per MikroTik, verifica se raggiungibili via Docker agent dello stesso cliente
+        allAgents.forEach(a => {
+            if (a.agent_type === 'mikrotik' || !a.agent_type) {
+                const bridgeAgent = connectedDockerByCustomer[a.customer_id];
+                if (bridgeAgent) {
+                    a.reachable = true;
+                    a.reachable_via = bridgeAgent;
+                } else {
+                    a.reachable = false;
+                }
+            }
         });
 
         document.getElementById('active-count').textContent = allAgents.length;
@@ -477,9 +498,15 @@ async function loadActiveAgents() {
                             <td><code>${a.address}</code></td>
                             <td><span class="badge ${a.agent_type === 'docker' ? 'bg-info' : 'bg-primary'}">${a.agent_type || 'mikrotik'}</span></td>
                             <td>
-                                <span class="badge ${a.ws_connected ? 'bg-success' : 'bg-secondary'}">
-                                    ${a.ws_connected ? '🔌 Connesso' : '⚫ Disconnesso'}
-                                </span>
+                                ${a.agent_type === 'docker' 
+                                    ? `<span class="badge ${a.ws_connected ? 'bg-success' : 'bg-danger'}">
+                                        ${a.ws_connected ? '<i class="bi bi-wifi"></i> Online' : '<i class="bi bi-x-circle"></i> Offline'}
+                                       </span>`
+                                    : (a.reachable 
+                                        ? `<span class="badge bg-info"><i class="bi bi-arrow-right-circle"></i> Raggiungibile</span>
+                                           <small class="text-muted d-block">via ${a.reachable_via}</small>`
+                                        : `<span class="badge bg-warning"><i class="bi bi-exclamation-triangle"></i> Non raggiungibile</span>`)
+                                }
                             </td>
                             <td>${a.version || 'N/A'}</td>
                             <td>
