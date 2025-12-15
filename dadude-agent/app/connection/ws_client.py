@@ -116,6 +116,7 @@ class AgentWebSocketClient:
         server_url: str,
         agent_id: str,
         agent_token: str,
+        agent_version: str = "2.2.4",
         client_cert_path: Optional[str] = None,
         client_key_path: Optional[str] = None,
         ca_cert_path: Optional[str] = None,
@@ -124,6 +125,7 @@ class AgentWebSocketClient:
         self.server_url = server_url
         self.agent_id = agent_id
         self.agent_token = agent_token
+        self.agent_version = agent_version
         
         # Certificati mTLS
         self.client_cert_path = client_cert_path
@@ -269,7 +271,7 @@ class AgentWebSocketClient:
             # Headers
             headers = {
                 "Authorization": f"Bearer {self.agent_token}",
-                "X-Agent-Version": "2.0.0",  # Versione con supporto WS
+                "X-Agent-Version": self.agent_version,
             }
             
             logger.info(f"Connecting to {ws_url}")

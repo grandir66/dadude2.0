@@ -22,7 +22,7 @@ from .config import get_settings
 
 
 # Version
-AGENT_VERSION = "2.2.4"
+AGENT_VERSION = "2.2.5"
 
 
 class DaDudeAgent:
@@ -118,6 +118,7 @@ class DaDudeAgent:
             server_url=self.server_url,
             agent_id=self.agent_id,
             agent_token=self.settings.agent_token,
+            agent_version=AGENT_VERSION,
             client_cert_path=str(self.certs_dir / "agent.crt") if (self.certs_dir / "agent.crt").exists() else None,
             client_key_path=str(self.certs_dir / "agent.key") if (self.certs_dir / "agent.key").exists() else None,
             ca_cert_path=str(self.certs_dir / "ca.crt") if (self.certs_dir / "ca.crt").exists() else None,
