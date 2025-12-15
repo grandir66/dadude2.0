@@ -278,6 +278,39 @@ admin_app.include_router(discovery.router, prefix="/api/v1")
 # (pending, outdated, approve, etc.) ma NON per WebSocket/register
 admin_app.include_router(agents.router, prefix="/api/v1")
 
+# Override WebSocket Hub endpoint per Admin UI - proxy to Agent API
+@admin_app.get("/api/v1/agents/ws/connected", tags=["Agents"])
+async def admin_list_connected_agents():
+    """
+    Lista agent connessi via WebSocket.
+
+    NOTA: Admin UI runs in separate process, so it proxies this request
+    to Agent API's WebSocket Hub (port 8000) to get real connection data.
+    """
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            # Query Agent API's WebSocket Hub
+            response = await client.get("http://localhost:8000/api/v1/agents/ws/connected")
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"Failed to proxy ws/connected: {response.status_code}")
+                return {
+                    "count": 0,
+                    "agents": [],
+                    "error": f"Agent API returned {response.status_code}"
+                }
+    except Exception as e:
+        logger.error(f"Failed to proxy ws/connected to Agent API: {e}")
+        return {
+            "count": 0,
+            "agents": [],
+            "error": str(e)
+        }
+
 # Dashboard (senza prefisso API)
 admin_app.include_router(dashboard.router)
 
