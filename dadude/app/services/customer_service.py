@@ -1187,9 +1187,13 @@ class CustomerService:
                 for a in all_agents:
                     if normalize(a.name) == base_name_norm:
                         return self._to_agent_safe(a)
-                    # Prova anche match parziale
-                    if base_name_norm in normalize(a.name) or normalize(a.name) in base_name_norm:
-                        return self._to_agent_safe(a)
+                    # Match parziale solo se i nomi sono molto simili (almeno 80% del nome)
+                    # Evita match tipo "ovh" in "pxovh51"
+                    a_name_norm = normalize(a.name)
+                    if len(a_name_norm) >= 4 and len(base_name_norm) >= 4:
+                        # Solo se uno è prefisso dell'altro e differiscono solo per numeri finali
+                        if base_name_norm.rstrip('0123456789') == a_name_norm.rstrip('0123456789'):
+                            return self._to_agent_safe(a)
             
             # Cerca per indirizzo IP (se fornito)
             if address:
