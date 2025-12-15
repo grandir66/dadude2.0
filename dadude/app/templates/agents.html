@@ -511,6 +511,14 @@ async function loadActiveAgents() {
                             <td>${a.version || 'N/A'}</td>
                             <td>
                                 <div class="btn-group btn-group-sm">
+                                    ${a.agent_type === 'mikrotik' || !a.agent_type
+                                        ? `<a href="/customers/${a.customer_id}/agents/${a.id}/mikrotik" class="btn btn-outline-info" title="Gestione MikroTik">
+                                            <i class="bi bi-router"></i>
+                                           </a>`
+                                        : `<button class="btn btn-outline-info" onclick="showAgentCapabilities('${a.id}')" title="Capacità Agent">
+                                            <i class="bi bi-cpu"></i>
+                                           </button>`
+                                    }
                                     <button class="btn btn-outline-dark" onclick="showConsoleModal('${a.id}', '${a.name}')" title="Console remota">
                                         <i class="bi bi-terminal"></i>
                                     </button>
@@ -902,6 +910,38 @@ async function testAgent(agentId, address, port) {
                   (data.ws_agent_id ? `WS ID: ${data.ws_agent_id}` : `URL: http://${address}:${port}`));
         } else {
             alert(`❌ Agent Offline\n\n${data.error || 'Non raggiungibile'}`);
+        }
+    } catch (e) {
+        alert('❌ Errore: ' + e.message);
+    }
+}
+
+async function showAgentCapabilities(agentId) {
+    try {
+        const response = await fetch(`/api/v1/admin/customers/agents/${agentId}/test`, { method: 'POST' });
+        const result = await response.json();
+        
+        if (result.success && result.results) {
+            const info = result.results.websocket || result.results.docker || {};
+            let msg = `🔌 Docker Agent: ${result.status}\n\n`;
+            msg += `Agent ID: ${info.agent_id || 'N/A'}\n`;
+            msg += `Nome: ${info.agent_name || 'N/A'}\n`;
+            msg += `Versione: ${info.version || 'N/A'}\n`;
+            if (info.capabilities && info.capabilities.length > 0) {
+                msg += `\n📋 Capacità:\n`;
+                info.capabilities.forEach(cap => {
+                    msg += `  ✓ ${cap.toUpperCase()}\n`;
+                });
+            }
+            if (info.probes && info.probes.length > 0) {
+                msg += `\n🔍 Probe disponibili:\n`;
+                info.probes.forEach(p => {
+                    msg += `  • ${p}\n`;
+                });
+            }
+            alert(msg);
+        } else {
+            alert('❌ Agent non raggiungibile o non disponibile\n\n' + (result.message || result.error || ''));
         }
     } catch (e) {
         alert('❌ Errore: ' + e.message);
