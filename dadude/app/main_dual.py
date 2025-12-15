@@ -193,6 +193,9 @@ agent_app.include_router(agents.router, prefix="/api/v1")
 # (scan-customer-networks, test, etc.)
 agent_app.include_router(customers.router, prefix="/api/v1")
 
+# Registra inventory router per auto-detect che usa WebSocket Hub
+agent_app.include_router(inventory.router, prefix="/api/v1")
+
 # Health check per agent
 @agent_app.get("/health", tags=["Health"])
 async def agent_health_check():
@@ -475,6 +478,94 @@ async def admin_trigger_agent_update(agent_db_id: str):
             )
     except Exception as e:
         logger.error(f"Trigger-update proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# PROXY: Inventory Auto-Detect (uses WebSocket Hub via agent_service)
+# ==========================================
+
+@admin_app.post("/api/v1/inventory/auto-detect", tags=["Admin"])
+async def admin_auto_detect(request: Request):
+    """
+    Proxy auto-detect to Agent API (port 8000).
+    
+    Auto-detect uses agent_service which requires WebSocket Hub access.
+    """
+    logger.info("Admin UI proxying auto-detect request")
+    try:
+        query_string = str(request.url.query)
+        url = f"http://localhost:8000/api/v1/inventory/auto-detect"
+        if query_string:
+            url += f"?{query_string}"
+        
+        body = await request.json()
+        
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            response = await client.post(url, json=body)
+            
+            if response.status_code == 200:
+                data = response.json()
+                logger.info(f"Auto-detect proxy successful")
+                return data
+            else:
+                logger.error(f"Auto-detect proxy failed: {response.status_code}")
+                return JSONResponse(
+                    status_code=response.status_code,
+                    content=response.json() if response.content else {"error": "Proxy failed"}
+                )
+    except Exception as e:
+        logger.error(f"Auto-detect proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_app.post("/api/v1/inventory/auto-detect-batch", tags=["Admin"])
+async def admin_auto_detect_batch(request: Request):
+    """
+    Proxy batch auto-detect to Agent API (port 8000).
+    """
+    logger.info("Admin UI proxying batch auto-detect request")
+    try:
+        query_string = str(request.url.query)
+        url = f"http://localhost:8000/api/v1/inventory/auto-detect-batch"
+        if query_string:
+            url += f"?{query_string}"
+        
+        body = await request.json()
+        
+        async with httpx.AsyncClient(timeout=600.0) as client:  # Longer for batch
+            response = await client.post(url, json=body)
+            return JSONResponse(
+                status_code=response.status_code,
+                content=response.json() if response.content else {}
+            )
+    except Exception as e:
+        logger.error(f"Auto-detect batch proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@admin_app.post("/api/v1/inventory/probe", tags=["Admin"])
+async def admin_probe_device(request: Request):
+    """
+    Proxy device probe to Agent API (port 8000).
+    """
+    logger.info("Admin UI proxying probe request")
+    try:
+        query_string = str(request.url.query)
+        url = f"http://localhost:8000/api/v1/inventory/probe"
+        if query_string:
+            url += f"?{query_string}"
+        
+        body = await request.json()
+        
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(url, json=body)
+            return JSONResponse(
+                status_code=response.status_code,
+                content=response.json() if response.content else {}
+            )
+    except Exception as e:
+        logger.error(f"Probe proxy error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
