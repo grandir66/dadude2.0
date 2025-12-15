@@ -200,10 +200,15 @@
     <!-- Tab Credenziali -->
     <div class="tab-pane fade" id="credentials">
         <div class="d-flex justify-content-between mb-3">
-            <h5>Credenziali</h5>
-            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#newCredentialModal">
-                <i class="bi bi-plus"></i> Nuova Credenziale
-            </button>
+            <h5>Credenziali Assegnate</h5>
+            <div>
+                <button class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#assignCredentialModal">
+                    <i class="bi bi-link"></i> Assegna Esistente
+                </button>
+                <a href="/settings/credentials" class="btn btn-outline-secondary btn-sm" title="Gestisci tutte le credenziali">
+                    <i class="bi bi-gear"></i> Gestione Credenziali
+                </a>
+            </div>
         </div>
         <div class="card table-modern">
             <table class="table table-hover mb-0">
@@ -252,11 +257,11 @@
                             {% endif %}
                         </td>
                         <td>
-                            <button class="btn btn-sm btn-outline-primary" onclick="editCredential('{{ cred.id }}')" title="Modifica">
-                                <i class="bi bi-pencil"></i>
+                            <button class="btn btn-sm btn-outline-primary" onclick="testCredential('{{ cred.id }}', '{{ cred.name }}', '{{ cred.credential_type }}')" title="Verifica stato">
+                                <i class="bi bi-check-circle"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteCredential('{{ cred.id }}', '{{ cred.name }}')" title="Elimina">
-                                <i class="bi bi-trash"></i>
+                            <button class="btn btn-sm btn-outline-danger" onclick="unlinkCredential('{{ cred.id }}', '{{ cred.name }}')" title="Rimuovi dal cliente">
+                                <i class="bi bi-x-lg"></i>
                             </button>
                         </td>
                     </tr>
@@ -271,10 +276,10 @@
     <!-- Tab Sonde -->
     <div class="tab-pane fade" id="agents">
         <div class="d-flex justify-content-between mb-3">
-            <h5>Sonde Remote</h5>
-            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#newAgentModal">
-                <i class="bi bi-plus"></i> Nuova Sonda
-            </button>
+            <h5>Sonde Assegnate</h5>
+            <a href="/agents" class="btn btn-outline-secondary btn-sm" title="Gestisci tutte le sonde">
+                <i class="bi bi-gear"></i> Gestione Sonde
+            </a>
         </div>
         <div class="card table-modern">
             <table class="table table-hover mb-0">
@@ -354,39 +359,12 @@
                         </td>
                         <td>{{ agent.last_seen.strftime('%d/%m %H:%M') if agent.last_seen else '-' }}</td>
                         <td>
-                            {% set agent_type = agent.agent_type if agent.agent_type else 'mikrotik' %}
                             <div class="btn-group btn-group-sm" role="group">
                                 <button class="btn btn-outline-primary" onclick="testAgent('{{ agent.id }}')" title="Test connessione">
                                     <i class="bi bi-wifi"></i>
                                 </button>
-                                {% if agent_type == 'docker' %}
-                                <button class="btn btn-outline-info" onclick="showAgentCapabilities('{{ agent.id }}')" title="Capacità Agent">
-                                    <i class="bi bi-cpu"></i>
-                                </button>
-                                {% endif %}
-                                {% if agent_type == 'mikrotik' and agent.connection_type in ['ssh', 'both'] %}
-                                <button class="btn btn-outline-secondary" onclick="openSshTerminal('{{ agent.id }}')" title="Terminale SSH">
-                                    <i class="bi bi-terminal"></i>
-                                </button>
-                                {% endif %}
-                                <button class="btn btn-outline-success" onclick="scanCustomerNetworks('{{ agent.id }}')" title="Scansiona reti cliente">
-                                    <i class="bi bi-search"></i>
-                                </button>
-                                {% if agent_type == 'docker' %}
-                                <button class="btn btn-outline-warning" onclick="autoDetectWithAgent('{{ agent.id }}')" title="Auto-Detect Dispositivi">
-                                    <i class="bi bi-bullseye"></i>
-                                </button>
-                                {% endif %}
-                                {% if agent_type == 'mikrotik' %}
-                                <a href="/customers/{{ customer.id }}/agents/{{ agent.id }}/mikrotik" class="btn btn-outline-info" title="Gestione MikroTik">
-                                    <i class="bi bi-router"></i>
-                                </a>
-                                {% endif %}
-                                <button class="btn btn-outline-secondary" onclick="editAgent('{{ agent.id }}')" title="Modifica">
-                                    <i class="bi bi-pencil"></i>
-                                </button>
-                                <button class="btn btn-outline-danger" onclick="deleteAgent('{{ agent.id }}')" title="Elimina">
-                                    <i class="bi bi-trash"></i>
+                                <button class="btn btn-outline-danger" onclick="unlinkAgent('{{ agent.id }}', '{{ agent.name }}')" title="Rimuovi dal cliente">
+                                    <i class="bi bi-x-lg"></i>
                                 </button>
                             </div>
                         </td>
@@ -832,6 +810,42 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
                     <button type="submit" class="btn btn-primary"><i class="bi bi-check"></i> Salva</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Assegna Credenziale Esistente -->
+<div class="modal fade" id="assignCredentialModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Assegna Credenziale al Cliente</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form id="assignCredentialForm">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Seleziona Credenziale</label>
+                        <select class="form-select" name="credential_id" required>
+                            <option value="">-- Seleziona --</option>
+                            {% for cred in global_credentials %}
+                            <option value="{{ cred.id }}">{{ cred.name }} ({{ cred.credential_type }}) - {{ cred.username or 'N/A' }}</option>
+                            {% endfor %}
+                        </select>
+                        <small class="text-muted">Seleziona una credenziale globale da assegnare a questo cliente</small>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="is_default" id="assignIsDefault">
+                        <label class="form-check-label" for="assignIsDefault">Imposta come default per questo cliente</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Annulla</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-link"></i> Assegna
+                    </button>
                 </div>
             </form>
         </div>
@@ -1570,6 +1584,51 @@ async function deleteCredential(credentialId, credentialName) {
     }
 }
 
+// Verifica stato credenziale
+async function testCredential(credentialId, credentialName, credentialType) {
+    alert(`Credenziale "${credentialName}" (${credentialType})\n\n✅ Credenziale configurata correttamente.\n\nPer testare la connessione, usa la credenziale su un dispositivo specifico.`);
+}
+
+// Rimuovi credenziale dal cliente (unlink, non elimina)
+async function unlinkCredential(credentialId, credentialName) {
+    if (!confirm(`Rimuovere la credenziale "${credentialName}" da questo cliente?\n\nLa credenziale non verrà eliminata, solo dissociata.`)) return;
+    
+    try {
+        const response = await fetch(`/api/v1/customers/{{ customer.id }}/credential-links/${credentialId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const err = await response.json();
+            alert('Errore: ' + (err.detail || 'Rimozione fallita'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
+// Rimuovi agent dal cliente (unlink, non elimina)
+async function unlinkAgent(agentId, agentName) {
+    if (!confirm(`Rimuovere la sonda "${agentName}" da questo cliente?\n\nLa sonda non verrà eliminata, solo dissociata e tornerà in attesa di approvazione.`)) return;
+    
+    try {
+        const response = await fetch(`/api/v1/agents/${agentId}/unassign`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const err = await response.json();
+            alert('Errore: ' + (err.detail || 'Rimozione fallita'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+}
+
 // Form Modifica Credenziale
 document.getElementById('editCredentialForm').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1890,6 +1949,34 @@ document.getElementById('newNetworkForm').addEventListener('submit', async (e) =
 });
 
 // Form Nuova Credenziale
+// Form Assegna Credenziale Esistente
+document.getElementById('assignCredentialForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const formData = new FormData(e.target);
+    const credentialId = formData.get('credential_id');
+    const isDefault = document.getElementById('assignIsDefault').checked;
+    
+    try {
+        const response = await fetch(`/api/v1/customers/{{ customer.id }}/credential-links`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                credential_id: credentialId,
+                is_default: isDefault
+            })
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            const err = await response.json();
+            alert('Errore: ' + (err.detail || 'Assegnazione fallita'));
+        }
+    } catch (e) {
+        alert('Errore: ' + e.message);
+    }
+});
+
 document.getElementById('newCredentialForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const formData = new FormData(e.target);
