@@ -813,8 +813,42 @@ async def test_agent_connection(
     
     agent_type = getattr(agent, 'agent_type', 'mikrotik')
     
-    # Se è un agent Docker, testa via HTTP
+    # Se è un agent Docker, verifica prima WebSocket poi HTTP
     if agent_type == "docker" or test_type == "docker":
+        from ..services.websocket_hub import get_websocket_hub
+        import re
+        
+        # Prima verifica connessione WebSocket
+        hub = get_websocket_hub()
+        ws_connected = False
+        ws_info = None
+        
+        if hub and hub._connections:
+            agent_name = getattr(agent, 'name', '')
+            for conn_id, conn in hub._connections.items():
+                match = re.match(r'^agent-(.+?)(?:-\d+)?$', conn_id)
+                if match and match.group(1) == agent_name:
+                    ws_connected = True
+                    ws_info = {
+                        "agent_id": conn_id,
+                        "connected_at": conn.connected_at.isoformat() if conn.connected_at else None,
+                        "last_heartbeat": conn.last_heartbeat.isoformat() if conn.last_heartbeat else None,
+                        "version": conn.version,
+                        "ip_address": conn.ip_address,
+                    }
+                    break
+        
+        if ws_connected:
+            service.update_agent_status(agent_id, "online", ws_info.get("version", ""))
+            return {
+                "success": True,
+                "connection_type": "websocket",
+                "status": "online",
+                "results": {"websocket": ws_info},
+                "message": f"Docker Agent OK via WebSocket - {agent.name}"
+            }
+        
+        # Fallback: testa via HTTP (legacy)
         from ..services.agent_service import get_agent_service
         
         agent_svc = get_agent_service()
@@ -848,7 +882,7 @@ async def test_agent_connection(
                 "connection_type": "docker",
                 "status": "offline",
                 "results": {"docker": {"error": str(e)}},
-                "message": f"Docker Agent fallito: {e}"
+                "message": f"Docker Agent non raggiungibile via HTTP: {e}"
             }
     
     # MikroTik nativo
