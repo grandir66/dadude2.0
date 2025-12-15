@@ -1,0 +1,80 @@
+# DaDude - Docker Compose Configuration (Dual Port)
+# ===================================================
+# Configurazione con porte separate per sicurezza:
+# - Porta 8000: Agent API (esposta su Internet)
+# - Porta 8001: Admin UI (solo rete interna)
+
+version: "3.8"
+
+services:
+  dadude:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dadude
+    restart: unless-stopped
+
+    # Espone entrambe le porte
+    ports:
+      - "8000:8000"  # Agent API (pubblico)
+      - "8001:8001"  # Admin UI (privato)
+
+    environment:
+      # Dude Server
+      - DUDE_HOST=${DUDE_HOST:-192.168.1.1}
+      - DUDE_API_PORT=${DUDE_API_PORT:-8728}
+      - DUDE_USE_SSL=${DUDE_USE_SSL:-false}
+      - DUDE_USERNAME=${DUDE_USERNAME:-admin}
+      - DUDE_PASSWORD=${DUDE_PASSWORD:-}
+
+      # DaDude
+      - DADUDE_HOST=0.0.0.0
+      - DADUDE_AGENT_PORT=8000
+      - DADUDE_ADMIN_PORT=8001
+      - DADUDE_API_KEY=${DADUDE_API_KEY:-}
+
+      # Polling
+      - POLL_INTERVAL=${POLL_INTERVAL:-60}
+      - FULL_SYNC_INTERVAL=${FULL_SYNC_INTERVAL:-300}
+      - CONNECTION_TIMEOUT=${CONNECTION_TIMEOUT:-30}
+
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+      # Webhook
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+
+      # Database
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/dadude.db}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+      - SECRET_KEY=${SECRET_KEY:-}
+
+    volumes:
+      - dadude_data:/app/data
+      - dadude_logs:/app/logs
+
+    networks:
+      - dadude_network
+
+    dns:
+      - 192.168.4.1
+      - 8.8.8.8
+
+    healthcheck:
+      # Verifica entrambe le porte
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health && curl -f http://localhost:8001/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  dadude_data:
+    driver: local
+  dadude_logs:
+    driver: local
+
+networks:
+  dadude_network:
+    driver: bridge

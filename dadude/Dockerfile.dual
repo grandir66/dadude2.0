@@ -1,0 +1,50 @@
+# DaDude - The Dude MikroTik Connector (Dual Port Configuration)
+# Dockerfile with separated Agent API (8000) and Admin UI (8001)
+
+FROM python:3.11-slim
+
+# Metadata
+LABEL maintainer="Domarc Srl"
+LABEL description="DaDude Dual Port - Agent API (8000) + Admin UI (8001)"
+LABEL version="1.1.0"
+
+# Environment
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV TZ=Europe/Rome
+
+# Working directory
+WORKDIR /app
+
+# Install system dependencies (curl for healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application
+COPY app/ ./app/
+
+# Create directories
+RUN mkdir -p /app/data /app/logs
+
+# Make run script executable
+RUN chmod +x /app/app/run_dual.py
+
+# Non-root user
+RUN useradd -m -u 1000 dadude && \
+    chown -R dadude:dadude /app
+USER dadude
+
+# Expose both ports
+EXPOSE 8000 8001
+
+# Health check - verifica entrambe le porte
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8000/health && curl -f http://localhost:8001/health || exit 1
+
+# Run dual server
+CMD ["python", "-m", "app.run_dual"]
