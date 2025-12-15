@@ -133,11 +133,23 @@ class AgentWebSocketHub:
         # Verifica se c'è già una connessione per questo agent
         if agent_id in self._connections:
             old_conn = self._connections[agent_id]
-            logger.warning(f"Agent {agent_id} reconnecting, closing old connection")
+            # Verifica se la vecchia connessione è ancora attiva
             try:
+                # Se è la stessa websocket, non fare nulla
+                if old_conn.websocket == websocket:
+                    logger.debug(f"Agent {agent_id} same websocket, skipping")
+                    return
+                
+                logger.warning(f"Agent {agent_id} reconnecting, closing old connection")
                 await old_conn.websocket.close(code=1000, reason="New connection")
             except Exception:
                 pass
+            
+            # Rimuovi la vecchia connessione
+            del self._connections[agent_id]
+            
+            # Attendi un momento per evitare race condition
+            await asyncio.sleep(0.1)
         
         # Accetta connessione
         await websocket.accept()

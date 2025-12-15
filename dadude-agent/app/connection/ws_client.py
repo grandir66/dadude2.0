@@ -367,9 +367,15 @@ class AgentWebSocketClient:
             except Exception as e:
                 logger.error(f"Run loop error: {e}")
             
-            # Disconnesso - riprova
+            # Disconnesso - riprova con delay
             await self._set_state(ConnectionState.DISCONNECTED)
             self._reconnect_count += 1
+            
+            # Delay prima di riconnettere per evitare loop rapidi
+            if self._running:
+                delay = self._reconnect_policy.next_delay()
+                logger.info(f"Connection lost. Reconnecting in {delay:.1f}s...")
+                await asyncio.sleep(delay)
         
         await self.disconnect()
     
