@@ -1163,48 +1163,19 @@ class CustomerService:
             if agent:
                 return self._to_agent_safe(agent)
             
-            # Cerca per nome contenuto nell'agent_unique_id (es: "agent-test1-3865" contiene "test1")
-            # Estrai il nome base rimuovendo prefisso "agent-" e suffisso numerico
+            # Cerca per nome base esatto (es: "agent-PX-OVH-51-1234" -> cerca "PX-OVH-51")
+            # IMPORTANTE: match solo ESATTO, no match parziali che causano falsi positivi
             import re
             name_match = re.match(r'^agent-(.+?)(-\d+)?$', agent_unique_id)
             if name_match:
                 base_name = name_match.group(1)
+                # Solo match esatto sul nome base
                 agent = session.query(AgentAssignmentDB).filter(
                     AgentAssignmentDB.name == base_name
                 ).first()
                 
                 if agent:
                     return self._to_agent_safe(agent)
-                
-                # Prova match normalizzato: "rete99" vs "Agent Rete 99"
-                def normalize(s: str) -> str:
-                    # Rimuovi prefisso "agent" e tutti i separatori
-                    s = s.lower().replace("agent", "").replace(" ", "").replace("-", "").replace("_", "")
-                    return s.strip()
-                
-                base_name_norm = normalize(base_name)
-                all_agents = session.query(AgentAssignmentDB).all()
-                for a in all_agents:
-                    if normalize(a.name) == base_name_norm:
-                        return self._to_agent_safe(a)
-                    # Match parziale solo se i nomi sono molto simili (almeno 80% del nome)
-                    # Evita match tipo "ovh" in "pxovh51"
-                    a_name_norm = normalize(a.name)
-                    if len(a_name_norm) >= 4 and len(base_name_norm) >= 4:
-                        # Solo se uno è prefisso dell'altro e differiscono solo per numeri finali
-                        if base_name_norm.rstrip('0123456789') == a_name_norm.rstrip('0123456789'):
-                            return self._to_agent_safe(a)
-            
-            # NON cercare per IP - con NAT più agent possono avere lo stesso IP pubblico
-            # Il match per IP causerebbe false corrispondenze
-            
-            # Cerca per agent_url contenente l'ID
-            agent = session.query(AgentAssignmentDB).filter(
-                AgentAssignmentDB.agent_url.contains(agent_unique_id)
-            ).first()
-            
-            if agent:
-                return self._to_agent_safe(agent)
             
             # NON usare match parziale - troppi falsi positivi
             # "OVH" in "agent-PX-OVH-51" = True (sbagliato!)

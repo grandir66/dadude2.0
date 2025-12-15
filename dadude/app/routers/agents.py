@@ -1285,7 +1285,7 @@ async def enroll_agent_certificate(
     # Trova agent e verifica token
     try:
         # Accedi direttamente al database per ottenere agent_token
-        from ..models.customer_schemas import AgentAssignmentDB
+        from ..models.database import AgentAssignment as AgentAssignmentDB
         session = service._get_session()
 
         # Prima cerca per ID database diretto
