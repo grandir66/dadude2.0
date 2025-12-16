@@ -67,14 +67,14 @@
 
 # ==========================================
 # 6. Crea environment variables
-# NOTA: RouterOS richiede valori senza virgolette per le variabili
+# NOTA: RouterOS potrebbe richiedere valori senza virgolette
 # ==========================================
-/container/envs/add name=dadude-env key=DADUDE_SERVER_URL value="https://dadude.domarc.it:8000"
+/container/envs/add name=dadude-env key=DADUDE_SERVER_URL value=https://dadude.domarc.it:8000
 /container/envs/add name=dadude-env key=DADUDE_AGENT_TOKEN value=$agentToken
 /container/envs/add name=dadude-env key=DADUDE_AGENT_ID value=$agentId
 /container/envs/add name=dadude-env key=DADUDE_AGENT_NAME value=$agentName
-/container/envs/add name=dadude-env key=DADUDE_DNS_SERVERS value="192.168.4.1,8.8.8.8"
-/container/envs/add name=dadude-env key=PYTHONUNBUFFERED value="1"
+/container/envs/add name=dadude-env key=DADUDE_DNS_SERVERS value=192.168.4.1,8.8.8.8
+/container/envs/add name=dadude-env key=PYTHONUNBUFFERED value=1
 
 # ==========================================
 # 7. Crea container dall'immagine tar
@@ -82,17 +82,17 @@
 # ==========================================
 # Prova prima con immagine su USB
 :do {
-    /container/add file="usb1/dadude-agent-mikrotik.tar.gz" interface=veth-dadude-agent root-dir="usb1/dadude-agent" envlist=dadude-env start-on-boot=yes logging=yes cmd="python -m app.agent"
+    /container/add file=usb1/dadude-agent-mikrotik.tar.gz interface=veth-dadude-agent root-dir=usb1/dadude-agent envlist=dadude-env start-on-boot=yes logging=yes cmd="python -m app.agent"
     :put "Container creato con immagine su USB"
 } on-error={
     # Se fallisce, prova con immagine in root
     :do {
-        /container/add file="/dadude-agent-mikrotik.tar.gz" interface=veth-dadude-agent root-dir="/dadude-agent" envlist=dadude-env start-on-boot=yes logging=yes cmd="python -m app.agent"
+        /container/add file=/dadude-agent-mikrotik.tar.gz interface=veth-dadude-agent root-dir=/dadude-agent envlist=dadude-env start-on-boot=yes logging=yes cmd="python -m app.agent"
         :put "Container creato con immagine in root"
     } on-error={
         :put "ERRORE: Impossibile creare container!"
         :put "Verifica che l'immagine esista:"
-        :put "  /file/print where name~\"dadude-agent-mikrotik\""
+        :put "  /file/print where name~dadude-agent-mikrotik"
     }
 }
 
