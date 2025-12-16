@@ -663,6 +663,28 @@ class CommandHandler:
                         error=f"Git fetch failed: {fetch_result.stderr[:200]}",
                     )
                 
+                # Backup .env files prima del reset (se esistono)
+                env_file = os.path.join(agent_dir, ".env")
+                env_file_subdir = os.path.join(agent_dir, "dadude-agent", ".env")
+                env_backup = None
+                env_backup_subdir = None
+                
+                if os.path.exists(env_file):
+                    import tempfile
+                    env_backup = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.env.backup')
+                    with open(env_file, 'r') as f:
+                        env_backup.write(f.read())
+                    env_backup.close()
+                    logger.info("Backed up .env file before git reset")
+                
+                if os.path.exists(env_file_subdir):
+                    import tempfile
+                    env_backup_subdir = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.env.subdir.backup')
+                    with open(env_file_subdir, 'r') as f:
+                        env_backup_subdir.write(f.read())
+                    env_backup_subdir.close()
+                    logger.info("Backed up dadude-agent/.env file before git reset")
+                
                 # Reset hard to origin/main (ignora modifiche locali)
                 logger.info("Resetting to origin/main...")
                 result = subprocess.run(
@@ -674,6 +696,13 @@ class CommandHandler:
                 )
                 if result.returncode != 0:
                     logger.warning(f"Git reset failed: {result.stderr}")
+                    # Ripristina .env se il reset fallisce
+                    if env_backup and os.path.exists(env_backup.name):
+                        shutil.copy(env_backup.name, env_file)
+                        os.unlink(env_backup.name)
+                    if env_backup_subdir and os.path.exists(env_backup_subdir.name):
+                        shutil.copy(env_backup_subdir.name, env_file_subdir)
+                        os.unlink(env_backup_subdir.name)
                     return CommandResult(
                         success=False,
                         status="error",
@@ -681,6 +710,26 @@ class CommandHandler:
                     )
                 else:
                     logger.info(f"Git update success: {result.stdout}")
+                    
+                    # Ripristina .env dopo il reset (se era stato salvato)
+                    if env_backup and os.path.exists(env_backup.name):
+                        if not os.path.exists(env_file) or os.path.getsize(env_file) == 0:
+                            shutil.copy(env_backup.name, env_file)
+                            logger.info("Restored .env file after git reset")
+                        os.unlink(env_backup.name)
+                    
+                    if env_backup_subdir and os.path.exists(env_backup_subdir.name):
+                        if not os.path.exists(env_file_subdir) or os.path.getsize(env_file_subdir) == 0:
+                            os.makedirs(os.path.dirname(env_file_subdir), exist_ok=True)
+                            shutil.copy(env_backup_subdir.name, env_file_subdir)
+                            logger.info("Restored dadude-agent/.env file after git reset")
+                        os.unlink(env_backup_subdir.name)
+                    
+                    # Assicurati che .env esista in dadude-agent/ se esiste nella root
+                    if os.path.exists(env_file) and not os.path.exists(env_file_subdir):
+                        os.makedirs(os.path.dirname(env_file_subdir), exist_ok=True)
+                        shutil.copy(env_file, env_file_subdir)
+                        logger.info("Copied .env to dadude-agent/ directory for docker-compose")
                     
                     # Copia app files se struttura diversa
                     src_app = os.path.join(agent_dir, "dadude-agent", "app")
