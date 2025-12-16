@@ -12,7 +12,7 @@ services:
     
     env_file:
       - /opt/dadude-agent/.env
-      - ./dadude-agent/.env
+      - ../.env
       - .env
     
     cap_add:
