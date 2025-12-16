@@ -110,7 +110,15 @@ class VersionManager:
             backup_name = f"backup_{current_commit[:8]}_{timestamp}"
             backup_path = self.backups_dir / backup_name
             
+            # Se la directory esiste già, rimuovila prima
+            if backup_path.exists():
+                logger.warning(f"Backup directory already exists: {backup_path}, removing...")
+                shutil.rmtree(backup_path)
+            
             logger.info(f"Creating backup: {backup_name}")
+            
+            # Crea la directory backup
+            backup_path.mkdir(parents=True, exist_ok=True)
             
             # Copia la directory app (escludendo versioni e backup)
             if (self.agent_dir / "app").exists():
