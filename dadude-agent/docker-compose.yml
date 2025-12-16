@@ -6,7 +6,9 @@ services:
     container_name: dadude-agent
     restart: unless-stopped
     
-    command: ["bash", "-c", "export PYTHONPATH=/opt/dadude-agent/dadude-agent:$PYTHONPATH && python -m app.agent"]
+    # IMPORTANTE: Usa il codice montato invece dell'immagine Docker
+    # Monta direttamente la directory app nella posizione corretta
+    command: ["bash", "-c", "cd /opt/dadude-agent/dadude-agent && export PYTHONPATH=/opt/dadude-agent/dadude-agent:$PYTHONPATH && python -m app.agent"]
     
     network_mode: host
     
@@ -23,12 +25,11 @@ services:
       # Monta la directory principale (con .git) per permettere update
       # Se docker-compose.yml è in dadude-agent/, monta la directory parent
       - ../:/opt/dadude-agent
-      # Monta anche il codice app per permettere aggiornamenti senza rebuild
-      # IMPORTANTE: Usa path assoluto per evitare problemi con path relativi
-      # Il codice montato sovrascrive quello nell'immagine Docker
+      # Monta il codice app direttamente sovrascrivendo quello dell'immagine
+      # Questo assicura che Python usi sempre il codice più recente da git
       - /opt/dadude-agent/dadude-agent/app:/app/app:ro
     
-    working_dir: /app
+    working_dir: /opt/dadude-agent/dadude-agent
     
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
