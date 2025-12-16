@@ -86,7 +86,7 @@ echo ""
 # === CONFIGURAZIONE SERVER ===
 echo -e "${BLUE}--- Server DaDude ---${NC}"
 
-DEFAULT_SERVER_URL="http://dadude.domarc.it:8000"
+DEFAULT_SERVER_URL="https://dadude.domarc.it:8000"
 
 while [ -z "$SERVER_URL" ]; do
     read -p "URL Server DaDude [$DEFAULT_SERVER_URL]: " SERVER_URL
