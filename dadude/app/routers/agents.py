@@ -355,7 +355,7 @@ async def list_pending_agents():
 # ==========================================
 
 # Versione corrente del server
-SERVER_VERSION = "2.3.11"
+SERVER_VERSION = "2.3.12"
 GITHUB_REPO = "grandir66/dadude"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}"
 
@@ -727,7 +727,7 @@ async def update_agent_config(
 # ==========================================
 
 # Versione corrente dell'agent (da aggiornare ad ogni release)
-AGENT_VERSION = "2.3.11"
+AGENT_VERSION = "2.3.12"
 
 @router.get("/version")
 async def get_current_agent_version():
