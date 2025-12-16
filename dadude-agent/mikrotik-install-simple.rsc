@@ -4,7 +4,7 @@
 # ==========================================
 # 
 # ISTRUZIONI:
-# 1. MODIFICA i valori qui sotto (token, agentId, agentName)
+# 1. MODIFICA i valori qui sotto se necessario (token, agentId, agentName)
 # 2. Copia TUTTO lo script
 # 3. Incollalo nella console RouterOS (Winbox o SSH)
 # 4. Premi Invio
@@ -20,7 +20,6 @@
 :local agentName "RB5009 Test"
 :local dnsServers "192.168.4.1,8.8.8.8"
 :local imageFile "dadude-agent-mikrotik.tar.gz"
-:local usbDisk "usb1"
 :local imageUrl "https://github.com/grandir66/Dadude/releases/latest/download/dadude-agent-mikrotik.tar.gz"
 
 # ==========================================
@@ -41,28 +40,33 @@
 }
 
 # ==========================================
-# 2. Verifica che il disco USB sia montato
+# 2. Trova disco USB (prova diversi nomi)
 # ==========================================
-:local usbFound 0
 :local usbPath ""
+:local usbFound 0
 
-# Prova diversi nomi comuni per il disco USB
-:local usbNames {"usb1", "usb1-disk1", "disk1", "usb"}
-:foreach usbName in=$usbNames do={
-    :if ([/file/print where name=$usbName] != "") do={
-        :set usbDisk $usbName
+:if ([/file/print where name="usb1"] != "") do={
+    :set usbPath "usb1"
+    :set usbFound 1
+    :put "Disco USB trovato: usb1"
+} else={
+    :if ([/file/print where name="usb1-disk1"] != "") do={
+        :set usbPath "usb1-disk1"
         :set usbFound 1
-        :set usbPath ("/" . $usbName)
-        :put ("Disco USB trovato: /" . $usbName)
+        :put "Disco USB trovato: usb1-disk1"
+    } else={
+        :if ([/file/print where name="disk1"] != "") do={
+            :set usbPath "disk1"
+            :set usbFound 1
+            :put "Disco USB trovato: disk1"
+        } else={
+            :put "ERRORE: Disco USB non trovato!"
+            :put "Dischi disponibili:"
+            /file/print
+            :put ""
+            :put "Modifica manualmente la variabile usbPath nello script"
+        }
     }
-}
-
-:if ($usbFound = 0) do={
-    :put "ERRORE: Disco USB non trovato!"
-    :put "Dischi disponibili:"
-    /file/print
-    :put ""
-    :put "Modifica la variabile usbDisk nello script con il nome corretto"
 }
 
 # ==========================================
@@ -71,94 +75,70 @@
 :local imagePath ""
 :local imageFound 0
 
-# Cerca l'immagine in diverse posizioni
+# Cerca l'immagine sul disco USB
 :if ($usbFound = 1) do={
-    :local usbImagePath ($usbPath . "/" . $imageFile)
+    :local usbImagePath ""
+    :set usbImagePath ($usbPath . "/" . $imageFile)
     :if ([/file/print where name=$usbImagePath] != "") do={
         :set imagePath $usbImagePath
         :set imageFound 1
         :put ("Immagine trovata su " . $usbImagePath)
-    } else={
-        :if ([/file/print where name=("/" . $imageFile)] != "") do={
-            :put ("Immagine trovata in root, spostando su " . $usbImagePath . "...")
-            :do {
-                /file/move source=("/" . $imageFile) destination=$usbImagePath
-                :set imagePath $usbImagePath
-                :set imageFound 1
-                :put ("Immagine spostata su " . $usbImagePath)
-            } on-error={
-                :put "Impossibile spostare, uso quella in root"
-                :set imagePath ("/" . $imageFile)
-                :set imageFound 1
-            }
-        }
     }
-} else={
-    # Se USB non trovato, cerca solo in root
-    :if ([/file/print where name=("/" . $imageFile)] != "") do={
-        :set imagePath ("/" . $imageFile)
+}
+
+# Se non trovata su USB, cerca in root
+:if ($imageFound = 0) do={
+    :local rootImagePath ""
+    :set rootImagePath ("/" . $imageFile)
+    :if ([/file/print where name=$rootImagePath] != "") do={
+        :set imagePath $rootImagePath
         :set imageFound 1
         :put ("Immagine trovata in root: " . $imagePath)
     }
 }
 
-# Se non trovata, scarica
+# Se ancora non trovata, scarica
 :if ($imageFound = 0) do={
     :put "Immagine non trovata, scaricando da GitHub Releases..."
-    :put "URL: $imageUrl"
+    :put ("URL: " . $imageUrl)
     :put "Questo potrebbe richiedere alcuni minuti (file ~100-200MB)..."
     
     :if ($usbFound = 1) do={
-        :local downloadPath ($usbPath . "/" . $imageFile)
+        :local downloadPath ""
+        :set downloadPath ($usbPath . "/" . $imageFile)
         :do {
             /tool/fetch url=$imageUrl dst=$downloadPath mode=http
             :set imagePath $downloadPath
+            :put ("Download completato su " . $downloadPath)
         } on-error={
-            :put "Errore durante il download su " . $downloadPath . ", provo in root..."
+            :put "Errore download su USB, provo in root..."
+            :local rootDownload ""
+            :set rootDownload ("/" . $imageFile)
             :do {
-                /tool/fetch url=$imageUrl dst=("/" . $imageFile) mode=http
-                :set imagePath ("/" . $imageFile)
+                /tool/fetch url=$imageUrl dst=$rootDownload mode=http
+                :set imagePath $rootDownload
+                :put ("Download completato in root: " . $imagePath)
             } on-error={
                 :put "ERRORE: Download fallito!"
-                :put "Verifica:"
-                :put "  - Connessione internet attiva"
-                :put "  - URL GitHub Releases accessibile"
-                :put "  - Spazio sufficiente sul disco"
+                :put "Verifica connessione internet e riprova"
             }
         }
     } else={
+        :local rootDownload ""
+        :set rootDownload ("/" . $imageFile)
         :do {
-            /tool/fetch url=$imageUrl dst=("/" . $imageFile) mode=http
-            :set imagePath ("/" . $imageFile)
+            /tool/fetch url=$imageUrl dst=$rootDownload mode=http
+            :set imagePath $rootDownload
+            :put ("Download completato in root: " . $imagePath)
         } on-error={
             :put "ERRORE: Download fallito!"
-            :put "Verifica:"
-            :put "  - Connessione internet attiva"
-            :put "  - URL GitHub Releases accessibile"
-            :put "  - Spazio sufficiente sul disco"
+            :put "Verifica connessione internet e riprova"
         }
     }
     
-    :delay 2s
+    :delay 3s
     
     # Verifica che il file sia stato scaricato
-    :if ($imagePath = "") do={
-        :if ($usbFound = 1) do={
-            :local checkPath ($usbPath . "/" . $imageFile)
-            :if ([/file/print where name=$checkPath] != "") do={
-                :set imagePath $checkPath
-            }
-        }
-        :if ($imagePath = "") do={
-            :if ([/file/print where name=("/" . $imageFile)] != "") do={
-                :set imagePath ("/" . $imageFile)
-            } else={
-                :put "ERRORE: Download fallito! Verifica la connessione internet e riprova."
-            }
-        }
-    }
-    
-    # Verifica dimensione file solo se trovato
     :if ($imagePath != "") do={
         :local fileSize 0
         :do {
@@ -168,20 +148,16 @@
         }
         
         :if ($fileSize < 1048576) do={
-            :put "ATTENZIONE: File scaricato potrebbe essere incompleto. Dimensione: $fileSize bytes"
+            :put ("ATTENZIONE: File potrebbe essere incompleto. Dimensione: " . $fileSize . " bytes")
         } else={
-            :put "Immagine scaricata con successo! Dimensione: $fileSize bytes"
-            :put "Percorso: $imagePath"
+            :put ("Immagine scaricata con successo! Dimensione: " . $fileSize . " bytes")
         }
     }
 }
 
-# Aggiorna imageFile con il percorso corretto
-:if ($imagePath != "") do={
-    :set imageFile ($imagePath)
-} else={
+:if ($imagePath = "") do={
     :put "ERRORE: Nessuna immagine trovata o scaricata!"
-    :put "Verifica manualmente che l'immagine esista o che il download sia completato."
+    :put "Impossibile continuare senza immagine Docker"
 }
 
 # ==========================================
@@ -230,17 +206,28 @@
 
 # ==========================================
 # 9. Crea environment variables
-# NOTA: RouterOS richiede valori letterali o concatenazione corretta
+# NOTA: RouterOS richiede valori letterali, quindi costruiamo le stringhe
 # ==========================================
-/container/envs/add name=dadude-env key=DADUDE_SERVER_URL value=$serverUrl
-/container/envs/add name=dadude-env key=DADUDE_AGENT_TOKEN value=$agentToken
-/container/envs/add name=dadude-env key=DADUDE_AGENT_ID value=$agentId
-/container/envs/add name=dadude-env key=DADUDE_AGENT_NAME value=$agentName
-/container/envs/add name=dadude-env key=DADUDE_DNS_SERVERS value=$dnsServers
+:local envServerUrl ""
+:set envServerUrl $serverUrl
+:local envToken ""
+:set envToken $agentToken
+:local envId ""
+:set envId $agentId
+:local envName ""
+:set envName $agentName
+:local envDns ""
+:set envDns $dnsServers
+
+/container/envs/add name=dadude-env key=DADUDE_SERVER_URL value=$envServerUrl
+/container/envs/add name=dadude-env key=DADUDE_AGENT_TOKEN value=$envToken
+/container/envs/add name=dadude-env key=DADUDE_AGENT_ID value=$envId
+/container/envs/add name=dadude-env key=DADUDE_AGENT_NAME value=$envName
+/container/envs/add name=dadude-env key=DADUDE_DNS_SERVERS value=$envDns
 /container/envs/add name=dadude-env key=PYTHONUNBUFFERED value="1"
 
 # ==========================================
-# 10. Crea container dall'immagine tar sul disco USB
+# 10. Crea container dall'immagine tar
 # ==========================================
 :if ($imagePath != "") do={
     :local rootDir ""
@@ -249,16 +236,25 @@
     } else={
         :set rootDir "/dadude-agent"
     }
+    
+    :put ("Creando container con immagine: " . $imagePath)
+    :put ("Root directory: " . $rootDir)
+    
     /container/add file=$imagePath interface=veth-dadude-agent root-dir=$rootDir envlist=dadude-env start-on-boot=yes logging=yes cmd="python -m app.agent"
 } else={
     :put "ERRORE: Nessun file immagine trovato! Impossibile creare il container."
-    :put "Verifica che l'immagine esista o che il download sia completato."
 }
 
 # ==========================================
 # 11. Avvia container
 # ==========================================
-/container/start 0
+:do {
+    /container/start 0
+    :put "Container avviato con successo!"
+} on-error={
+    :put "ERRORE: Impossibile avviare il container"
+    :put "Verifica i log con: /container/logs 0"
+}
 
 # ==========================================
 # 12. Verifica installazione
@@ -278,4 +274,3 @@
 :put "IMPORTANTE:"
 :put "L'agent si auto-registrerà al server."
 :put "Vai su https://dadude.domarc.it:8001/agents per approvare l'agent."
-
