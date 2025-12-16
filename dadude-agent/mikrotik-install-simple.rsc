@@ -12,10 +12,10 @@
 # ==========================================
 
 # ==========================================
-# CONFIGURAZIONE - MODIFICA QUESTI VALORI
+# CONFIGURAZIONE - VALORI PRECONFIGURATI (pronto all'uso)
 # ==========================================
 :local serverUrl "https://dadude.domarc.it:8000"
-:local agentToken "INSERISCI_IL_TUO_TOKEN_QUI"
+:local agentToken "mio-token-rb5009"
 :local agentId "agent-rb5009-test"
 :local agentName "RB5009 Test"
 :local dnsServers "192.168.4.1,8.8.8.8"
