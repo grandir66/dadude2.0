@@ -43,6 +43,7 @@ class BackupDeviceRequest(BaseModel):
     customer_id: Optional[str] = Field(None, description="ID cliente (richiesto se device_ip)")
     device_type: str = Field("auto", description="Tipo device: hp_aruba, mikrotik, auto")
     backup_type: str = Field("config", description="Tipo: config, binary, both, full")
+    credential_id: Optional[str] = Field(None, description="ID credenziale da usare (opzionale, altrimenti usa default)")
 
 
 class BackupCustomerRequest(BaseModel):
