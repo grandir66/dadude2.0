@@ -6,25 +6,23 @@ services:
     container_name: dadude-agent
     restart: unless-stopped
     
-    # Usa agent WebSocket
     command: ["python", "-m", "app.agent"]
     
-    # Network: host per accedere alla rete locale
     network_mode: host
     
-    # Leggi variabili da .env
     env_file:
       - .env
     
-    # Volumes per config e auto-update
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    
     volumes:
       - ./config:/app/config:ro
-      # Monta socket Docker per permettere auto-update
       - /var/run/docker.sock:/var/run/docker.sock
-      # Monta directory root del repo per git pull (parent di dadude-agent/)
-      - ../:/opt/dadude-agent
+      # Monta la directory corrente (con .git) per permettere update
+      - .:/opt/dadude-agent
     
-    # Working directory per update
     working_dir: /app
     
     healthcheck:
