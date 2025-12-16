@@ -23,6 +23,8 @@ services:
       # Monta la directory principale (con .git) per permettere update
       # Se docker-compose.yml è in dadude-agent/, monta la directory parent
       - ../:/opt/dadude-agent
+      # Monta anche il codice app per permettere aggiornamenti senza rebuild
+      - ./app:/app/app:ro
     
     working_dir: /app
     
