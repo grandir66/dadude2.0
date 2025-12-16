@@ -18,8 +18,14 @@ from .workers.queue_worker import QueueWorker, StoreForwardManager
 from .fallback.sftp_uploader import SFTPFallbackUploader, SFTPConfig
 from .updater.self_update import SelfUpdater
 from .scheduler.local_scheduler import LocalScheduler
-from .services.version_manager import VersionManager
 from .config import get_settings
+
+# Import opzionale per VersionManager (potrebbe non essere presente in versioni vecchie)
+try:
+    from .services.version_manager import VersionManager
+except ImportError:
+    VersionManager = None
+    logger.warning("VersionManager not available - auto-update features disabled")
 
 
 # Version
@@ -352,15 +358,22 @@ class DaDudeAgent:
             # Signal handlers non disponibili (es. Windows)
             pass
         
-        # Inizializza Version Manager per check aggiornamenti
-        agent_dir = os.getenv("AGENT_DIR", "/opt/dadude-agent")
-        self._version_manager = VersionManager(agent_dir=agent_dir)
-        
-        # Verifica e applica aggiornamenti all'avvio (PRIMA di inizializzare componenti)
-        await self._check_and_update_on_startup()
-        
-        # Esegui pulizia spazio disco all'avvio
-        await self._cleanup_disk_space()
+        # Inizializza Version Manager per check aggiornamenti (se disponibile)
+        if VersionManager is not None:
+            try:
+                agent_dir = os.getenv("AGENT_DIR", "/opt/dadude-agent")
+                self._version_manager = VersionManager(agent_dir=agent_dir)
+                
+                # Verifica e applica aggiornamenti all'avvio (PRIMA di inizializzare componenti)
+                await self._check_and_update_on_startup()
+                
+                # Esegui pulizia spazio disco all'avvio
+                await self._cleanup_disk_space()
+            except Exception as e:
+                logger.warning(f"VersionManager initialization failed: {e}, continuing without auto-update")
+                self._version_manager = None
+        else:
+            logger.info("VersionManager not available, skipping auto-update checks")
         
         await self._initialize_components()
         
