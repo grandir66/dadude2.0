@@ -1441,6 +1441,9 @@ async def update_inventory_device(device_id: str, updates: dict):
         if not device:
             raise HTTPException(status_code=404, detail="Dispositivo non trovato")
         
+        # PRESERVA credential_id esistente se non viene esplicitamente passato nell'update
+        existing_credential_id = device.credential_id
+        
         # Campi aggiornabili
         allowed_fields = [
             'name', 'hostname', 'device_type', 'category', 'manufacturer',
@@ -1451,7 +1454,20 @@ async def update_inventory_device(device_id: str, updates: dict):
         
         for field, value in updates.items():
             if field in allowed_fields:
-                setattr(device, field, value)
+                # Protezione speciale per credential_id: preserva se non viene esplicitamente passato o se viene passato None
+                if field == 'credential_id':
+                    # Permetti solo se viene esplicitamente passato un valore non-None
+                    # Se viene passato None o non viene passato, preserva quello esistente
+                    if value is not None:
+                        setattr(device, field, value)
+                    # Se value è None, non fare nulla (preserva esistente)
+                else:
+                    setattr(device, field, value)
+        
+        # Assicurati che credential_id non venga perso accidentalmente
+        if device.credential_id != existing_credential_id and 'credential_id' not in updates:
+            logger.warning(f"Preserving existing credential_id {existing_credential_id} for device {device_id} (was about to be lost)")
+            device.credential_id = existing_credential_id
         
         session.commit()
         
