@@ -24,7 +24,7 @@ from .services.websocket_hub import get_websocket_hub
 from .routers import (
     devices, probes, alerts, webhook, system, customers,
     import_export, dashboard, discovery, mikrotik, inventory, agents,
-    settings as settings_router
+    settings as settings_router, device_backup
 )
 
 
@@ -652,6 +652,7 @@ admin_app.include_router(agents.router, prefix="/api/v1")
 # Dashboard (senza prefisso API)
 admin_app.include_router(dashboard.router)
 admin_app.include_router(settings_router.router, prefix="/api/v1")
+admin_app.include_router(device_backup.router, prefix="/api/v1")
 
 # Monta directory static se esiste
 static_dir = os.path.join(os.path.dirname(__file__), "static")

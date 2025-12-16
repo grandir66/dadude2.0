@@ -10,6 +10,10 @@ from . import customers
 from . import import_export
 from . import dashboard
 from . import discovery
+from . import mikrotik
+from . import inventory
+from . import agents
+from . import device_backup
 
 __all__ = [
     "devices", 
@@ -21,4 +25,8 @@ __all__ = [
     "import_export",
     "dashboard",
     "discovery",
+    "mikrotik",
+    "inventory",
+    "agents",
+    "device_backup",
 ]

@@ -12,7 +12,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 CONTAINER_ID="${1:-}"
-SERVER="192.168.40.3"
+SERVER="${2:-192.168.4.45}"
 
 echo -e "${BLUE}=====================================================================${NC}"
 echo -e "${BLUE}    Device Backup Module - Quick Deploy to Docker Container${NC}"
@@ -23,7 +23,11 @@ echo ""
 if [ -z "$CONTAINER_ID" ]; then
     echo -e "${RED}❌ Container ID not provided${NC}"
     echo ""
-    echo "Usage: $0 <container_id>"
+    echo "Usage: $0 <container_id> [server_ip]"
+    echo ""
+    echo "Examples:"
+    echo "  $0 abc123def456"
+    echo "  $0 abc123def456 192.168.4.45"
     echo ""
     echo "Find container ID with:"
     echo "  ssh root@$SERVER 'docker ps'"
