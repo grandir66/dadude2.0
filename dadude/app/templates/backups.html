@@ -317,8 +317,106 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Carica lista clienti per storico
+async function loadCustomers() {
+    try {
+        const response = await fetch('/api/v1/customers?active_only=true');
+        const data = await response.json();
+        const customers = data.customers || [];
+        
+        const select = document.getElementById('historyCustomerId');
+        customers.forEach(customer => {
+            const option = document.createElement('option');
+            option.value = customer.id;
+            option.textContent = `${customer.name} (${customer.code})`;
+            select.appendChild(option);
+        });
+    } catch (e) {
+        console.error('Error loading customers:', e);
+    }
+}
+
+// Carica storico backup dal database
+async function loadBackupHistory() {
+    const customerId = document.getElementById('historyCustomerId').value;
+    const deviceType = document.getElementById('historyDeviceType').value;
+    const days = document.getElementById('historyDays').value;
+    
+    const tbody = document.getElementById('historyTable');
+    
+    if (!customerId) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Seleziona un cliente per visualizzare lo storico backup</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Caricamento...</span></div></td></tr>';
+    
+    try {
+        const response = await fetch(`/api/v1/device-backup/history/customer/${customerId}?days=${days}`);
+        const data = await response.json();
+        
+        if (!data.backups || data.backups.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Nessun backup trovato</td></tr>';
+            return;
+        }
+        
+        // Filtra per tipo device se specificato
+        let backups = data.backups;
+        if (deviceType) {
+            backups = backups.filter(b => b.device_type === deviceType);
+        }
+        
+        if (backups.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Nessun backup trovato per il tipo selezionato</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = backups.map(backup => {
+            const date = backup.created_at ? new Date(backup.created_at).toLocaleString('it-IT') : '-';
+            const size = backup.file_size ? formatFileSize(backup.file_size) : '-';
+            const statusBadge = backup.success 
+                ? '<span class="badge bg-success">Successo</span>'
+                : '<span class="badge bg-danger">Errore</span>';
+            
+            const deviceTypeBadge = {
+                'mikrotik': '<span class="badge bg-primary">MikroTik</span>',
+                'hp_aruba': '<span class="badge bg-info">HP/Aruba</span>',
+                'proxmox': '<span class="badge bg-warning">Proxmox</span>'
+            }[backup.device_type] || '<span class="badge bg-secondary">' + (backup.device_type || 'Unknown') + '</span>';
+            
+            const actions = backup.success && backup.file_name
+                ? `<button class="btn btn-sm btn-outline-success" onclick="downloadBackupById('${backup.id}')" title="Scarica">
+                     <i class="bi bi-download"></i>
+                   </button>`
+                : '<span class="text-muted">-</span>';
+            
+            return `
+                <tr>
+                    <td>${date}</td>
+                    <td>${escapeHtml(backup.device_hostname || backup.device_ip || 'N/A')}</td>
+                    <td>${deviceTypeBadge}</td>
+                    <td><code>${escapeHtml(backup.file_name || '-')}</code></td>
+                    <td>${size}</td>
+                    <td>${statusBadge}${backup.error_message ? '<br><small class="text-danger">' + escapeHtml(backup.error_message) + '</small>' : ''}</td>
+                    <td>${actions}</td>
+                </tr>
+            `;
+        }).join('');
+        
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">Errore: ${e.message}</td></tr>`;
+    }
+}
+
+async function downloadBackupById(backupId) {
+    window.open(`/api/v1/device-backup/download/${backupId}`, '_blank');
+}
+
 // Carica file all'avvio
 loadFiles();
+
+// Carica clienti all'avvio
+loadCustomers();
 </script>
 
 {% endblock %}
