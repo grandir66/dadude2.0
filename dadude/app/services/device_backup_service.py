@@ -429,7 +429,6 @@ class DeviceBackupService:
                 username=credentials["username"],
                 password=credentials["password"],
                 port=ssh_port,
-                port=credentials.get("port", 22),
                 backup_path=backup_path,
                 backup_type=backup_type
             )
