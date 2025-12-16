@@ -1,10 +1,10 @@
 # ==========================================
 # DaDude Agent - Installazione su MikroTik RB5009
-# Versione semplificata per copia/incolla diretto
+# Versione completamente hardcoded - pronta all'uso
 # ==========================================
 # 
 # ISTRUZIONI:
-# 1. MODIFICA i valori qui sotto se necessario (token, agentId, agentName)
+# 1. MODIFICA i valori hardcoded qui sotto se necessario (cerca "MODIFICA")
 # 2. Copia TUTTO lo script
 # 3. Incollalo nella console RouterOS (Winbox o SSH)
 # 4. Premi Invio
@@ -12,14 +12,14 @@
 # ==========================================
 
 # ==========================================
-# CONFIGURAZIONE - VALORI PRECONFIGURATI (pronto all'uso)
+# CONFIGURAZIONE - MODIFICA QUESTI VALORI SE NECESSARIO
 # ==========================================
-:local serverUrl "https://dadude.domarc.it:8000"
+# MODIFICA: Token agent (qualsiasi stringa)
 :local agentToken "mio-token-rb5009"
+# MODIFICA: ID agent
 :local agentId "agent-rb5009-test"
+# MODIFICA: Nome agent
 :local agentName "RB5009 Test"
-:local dnsServers "192.168.4.1,8.8.8.8"
-:local imageFile "dadude-agent-mikrotik.tar.gz"
 
 # ==========================================
 # 1. Verifica che Container Mode sia abilitato
@@ -39,19 +39,19 @@
 }
 
 # ==========================================
-# 2. Trova immagine Docker (cerca in diverse posizioni)
+# 2. Trova immagine Docker (usa percorso hardcoded)
 # ==========================================
 :local imagePath ""
 
-# Cerca prima su USB (senza slash iniziale per RouterOS)
-:if ([/file/print where name=("usb1/" . $imageFile)] != "") do={
-    :set imagePath ("usb1/" . $imageFile)
-    :put ("Immagine trovata su USB: usb1/" . $imageFile)
+# Prova prima su USB
+:if ([/file/print where name="usb1/dadude-agent-mikrotik.tar.gz"] != "") do={
+    :set imagePath "usb1/dadude-agent-mikrotik.tar.gz"
+    :put "Immagine trovata su USB: usb1/dadude-agent-mikrotik.tar.gz"
 } else={
-    # Cerca in root (con slash iniziale)
-    :if ([/file/print where name=("/" . $imageFile)] != "") do={
-        :set imagePath ("/" . $imageFile)
-        :put ("Immagine trovata in root: /" . $imageFile)
+    # Prova in root
+    :if ([/file/print where name="/dadude-agent-mikrotik.tar.gz"] != "") do={
+        :set imagePath "/dadude-agent-mikrotik.tar.gz"
+        :put "Immagine trovata in root: /dadude-agent-mikrotik.tar.gz"
     } else={
         :put "ERRORE: Immagine non trovata!"
         :put "Verifica che il file esista con: /file/print"
@@ -104,14 +104,12 @@
 /ip/firewall/nat/add chain=srcnat action=masquerade src-address=172.17.0.0/24 out-interface=bridge-dadude-agent comment="dadude-agent-nat"
 
 # ==========================================
-# 8. Crea environment variables
-# NOTA: RouterOS non accetta variabili nelle value, quindi usiamo valori letterali
-# Modifica questi valori se necessario
+# 8. Crea environment variables (valori hardcoded)
 # ==========================================
 /container/envs/add name=dadude-env key=DADUDE_SERVER_URL value="https://dadude.domarc.it:8000"
-/container/envs/add name=dadude-env key=DADUDE_AGENT_TOKEN value="mio-token-rb5009"
-/container/envs/add name=dadude-env key=DADUDE_AGENT_ID value="agent-rb5009-test"
-/container/envs/add name=dadude-env key=DADUDE_AGENT_NAME value="RB5009 Test"
+/container/envs/add name=dadude-env key=DADUDE_AGENT_TOKEN value=$agentToken
+/container/envs/add name=dadude-env key=DADUDE_AGENT_ID value=$agentId
+/container/envs/add name=dadude-env key=DADUDE_AGENT_NAME value=$agentName
 /container/envs/add name=dadude-env key=DADUDE_DNS_SERVERS value="192.168.4.1,8.8.8.8"
 /container/envs/add name=dadude-env key=PYTHONUNBUFFERED value="1"
 
