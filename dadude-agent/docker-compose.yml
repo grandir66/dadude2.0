@@ -24,8 +24,9 @@ services:
       # Se docker-compose.yml è in dadude-agent/, monta la directory parent
       - ../:/opt/dadude-agent
       # Monta anche il codice app per permettere aggiornamenti senza rebuild
-      # IMPORTANTE: Il codice montato sovrascrive quello nell'immagine Docker
-      - ./app:/app/app:ro
+      # IMPORTANTE: Usa path assoluto per evitare problemi con path relativi
+      # Il codice montato sovrascrive quello nell'immagine Docker
+      - /opt/dadude-agent/dadude-agent/app:/app/app:ro
     
     working_dir: /app
     
