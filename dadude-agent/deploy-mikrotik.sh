@@ -342,35 +342,40 @@ fi
 echo -e "${GREEN}✅ Script RouterOS generato: $INSTALL_SCRIPT${NC}"
 echo ""
 
-# Step 7: Carica ed esegui lo script RouterOS
-echo -e "${BLUE}[7/7] Caricando ed eseguendo script di installazione sul router...${NC}"
-echo -e "${YELLOW}NOTA: Lo script viene caricato sul router e poi eseguito con /import${NC}"
+# Step 7: Mostra istruzioni per esecuzione manuale
+echo -e "${BLUE}[7/7] Script RouterOS generato${NC}"
 echo ""
-
-# Carica lo script sul router
-scp -o StrictHostKeyChecking=no "$INSTALL_SCRIPT" admin@$ROUTER_IP:/tmp/dadude-install.rsc || {
-    echo -e "${YELLOW}⚠️  Impossibile caricare via SCP, provo metodo alternativo...${NC}"
-    # Metodo alternativo: esegui direttamente via SSH
-    ssh -o StrictHostKeyChecking=no admin@$ROUTER_IP "$(cat "$INSTALL_SCRIPT")" || {
-        echo -e "${RED}❌ Errore durante l'installazione${NC}"
-        echo ""
-        echo "Esegui manualmente lo script:"
-        echo "  1. Copia il contenuto di: $INSTALL_SCRIPT"
-        echo "  2. Incollalo nella console RouterOS (Winbox o SSH)"
-        exit 1
-    }
-    exit 0
-}
-
-# Esegui lo script sul router
-ssh -o StrictHostKeyChecking=no admin@$ROUTER_IP "/import file-name=tmp/dadude-install.rsc" || {
-    echo -e "${RED}❌ Errore durante l'esecuzione dello script${NC}"
+echo -e "${YELLOW}⚠️  IMPORTANTE: RouterOS non supporta l'esecuzione automatica via SSH pipe${NC}"
+echo ""
+echo -e "${GREEN}✅ Script generato: $INSTALL_SCRIPT${NC}"
+echo ""
+echo -e "${BLUE}Per installare l'agent, esegui una di queste opzioni:${NC}"
+echo ""
+echo -e "${YELLOW}OPZIONE 1: Copia e incolla diretto (CONSIGLIATO)${NC}"
+echo "  1. Apri la console RouterOS (Winbox o SSH)"
+echo "  2. Copia il contenuto del file: $INSTALL_SCRIPT"
+echo "  3. Incollalo nella console RouterOS"
+echo "  4. Premi Invio"
+echo ""
+echo -e "${YELLOW}OPZIONE 2: Carica file via Winbox${NC}"
+echo "  1. Apri Winbox → Files"
+echo "  2. Upload → Seleziona: $INSTALL_SCRIPT"
+echo "  3. Salva in: /"
+echo "  4. Nella console RouterOS esegui: /import file-name=dadude-install-*.rsc"
+echo ""
+echo -e "${YELLOW}OPZIONE 3: Usa lo script semplificato${NC}"
+echo "  File: mikrotik-install-simple.rsc"
+echo "  Modifica i valori di configurazione e copia/incolla direttamente"
+echo ""
+read -p "Vuoi vedere il contenuto dello script generato? (y/n) " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo ""
-    echo "Lo script è stato caricato su /tmp/dadude-install.rsc"
-    echo "Puoi eseguirlo manualmente con:"
-    echo "  ssh admin@$ROUTER_IP '/import file-name=tmp/dadude-install.rsc'"
-    exit 1
-}
+    echo -e "${BLUE}=== CONTENUTO SCRIPT ===${NC}"
+    cat "$INSTALL_SCRIPT"
+    echo ""
+    echo -e "${BLUE}=== FINE SCRIPT ===${NC}"
+fi
 
 echo ""
 echo -e "${GREEN}✅ Installazione completata!${NC}"
