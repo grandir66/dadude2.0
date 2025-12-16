@@ -543,18 +543,24 @@ class DeviceBackupService:
     def _get_customer_default_credentials(self, customer: Customer,
                                          device_type: str) -> Optional[Dict[str, Any]]:
         """Recupera credenziali di default del cliente per tipo device"""
-        # Query credenziali SSH di default per il cliente
+        # Query credenziali appropriate per tipo device
+        if device_type == "mikrotik":
+            cred_types = ["mikrotik", "ssh", "device"]
+        else:
+            cred_types = ["ssh", "device"]
+        
+        # Query credenziali di default per il cliente
         cred = self.db.query(Credential).filter(
             Credential.customer_id == customer.id,
             Credential.is_default == True,
-            Credential.credential_type.in_(["ssh", "device"])
+            Credential.credential_type.in_(cred_types)
         ).first()
 
         if not cred:
             # Prova credenziali globali
             cred = self.db.query(Credential).filter(
                 Credential.is_global == True,
-                Credential.credential_type.in_(["ssh", "device"])
+                Credential.credential_type.in_(cred_types)
             ).first()
 
         if not cred:
@@ -567,11 +573,19 @@ class DeviceBackupService:
             self.logger.warning(f"Failed to decrypt password for credential {cred.id}")
             password = None
 
+        # Determina porta in base al tipo device
+        if device_type == "mikrotik":
+            port = cred.mikrotik_api_port or 8728
+        else:
+            port = cred.ssh_port or 22
+
         return {
             "credential_id": cred.id,
             "username": cred.username,
             "password": password,
-            "port": cred.ssh_port or 22
+            "port": port,
+            "mikrotik_api_port": cred.mikrotik_api_port if hasattr(cred, 'mikrotik_api_port') else None,
+            "mikrotik_api_ssl": cred.mikrotik_api_ssl if hasattr(cred, 'mikrotik_api_ssl') else False,
         }
 
     def _detect_device_type(self, assignment: DeviceAssignment) -> str:
