@@ -6,7 +6,7 @@ services:
     container_name: dadude-agent
     restart: unless-stopped
     
-    command: ["python", "-m", "app.agent"]
+    command: ["bash", "-c", "export PYTHONPATH=/opt/dadude-agent/dadude-agent:$PYTHONPATH && python -m app.agent"]
     
     network_mode: host
     
