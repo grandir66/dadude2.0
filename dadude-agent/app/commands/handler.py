@@ -784,6 +784,66 @@ class CommandHandler:
             
             logger.info("Git update completed successfully")
             
+            # Prova a riavviare il container Docker
+            agent_compose_dir = agent_dir
+            if not os.path.exists(os.path.join(agent_compose_dir, "docker-compose.yml")):
+                agent_compose_dir = os.path.join(agent_dir, "dadude-agent")
+            
+            if os.path.exists(os.path.join(agent_compose_dir, "docker-compose.yml")):
+                logger.info("Rebuilding Docker image...")
+                
+                # Build
+                build_result = subprocess.run(
+                    ["docker", "compose", "build", "--quiet"],
+                    cwd=agent_compose_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+                
+                if build_result.returncode == 0:
+                    logger.info("Docker build completed. Restarting container...")
+                    
+                    # Rimuovi container vecchi
+                    try:
+                        subprocess.run(
+                            ["docker", "rm", "-f", "dadude-agent"],
+                            capture_output=True,
+                            timeout=10,
+                        )
+                    except:
+                        pass
+                    
+                    # Riavvia container in background
+                    restart_result = subprocess.Popen(
+                        ["docker", "compose", "up", "-d", "--force-recreate"],
+                        cwd=agent_compose_dir,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    
+                    logger.info("Container restart initiated")
+                    
+                    return CommandResult(
+                        success=True,
+                        status="success",
+                        data={
+                            "message": "Update completed. Container restarting...",
+                            "restarting": True,
+                        },
+                    )
+                else:
+                    logger.warning(f"Docker build failed: {build_result.stderr[:200]}")
+                    return CommandResult(
+                        success=True,
+                        status="success",
+                        data={
+                            "message": "Code updated but Docker build failed. Manual restart required.",
+                            "needs_restart": True,
+                            "build_error": build_result.stderr[:200],
+                        },
+                    )
+            
             return CommandResult(
                 success=True,
                 status="success",
