@@ -209,6 +209,111 @@ class DaDudeAgent:
                 if current_version:
                     logger.info(f"Version {current_version[:8]} verified as stable (connected successfully)")
     
+    async def _cleanup_disk_space(self):
+        """Esegue pulizia spazio disco all'avvio."""
+        if not self._version_manager:
+            return
+        
+        try:
+            logger.info("Running disk cleanup on startup...")
+            cleanup_stats = self._version_manager.cleanup_all()
+            
+            if cleanup_stats["total_freed_mb"] > 0:
+                logger.info(f"Disk cleanup freed {cleanup_stats['total_freed_mb']}MB")
+            else:
+                logger.info("Disk cleanup: no cleanup needed")
+        except Exception as e:
+            logger.warning(f"Disk cleanup error: {e}")
+    
+    async def _check_and_update_on_startup(self):
+        """
+        Verifica aggiornamenti all'avvio e applica se necessario.
+        Se l'update fallisce la connessione, esegue rollback automatico.
+        """
+        if not self._version_manager:
+            return
+        
+        try:
+            logger.info("Checking for updates on startup...")
+            
+            # Verifica se ci sono aggiornamenti disponibili
+            new_commit = self._version_manager.check_for_updates()
+            current_commit = self._version_manager.get_current_commit()
+            
+            if not new_commit:
+                logger.info("No updates available")
+                return
+            
+            # Verifica se la nuova versione è marcata come bad
+            if self._version_manager.is_bad_version(new_commit):
+                logger.warning(f"Update {new_commit[:8]} is marked as bad, skipping")
+                return
+            
+            logger.info(f"Update available: {current_commit[:8] if current_commit else 'unknown'} -> {new_commit[:8]}")
+            
+            # Backup versione corrente
+            backup_path = self._version_manager.backup_current_version()
+            if not backup_path:
+                logger.error("Failed to create backup, aborting update")
+                return
+            
+            # Aggiorna alla nuova versione
+            if not self._version_manager.update_to_version(new_commit):
+                logger.error("Failed to update, restoring backup...")
+                self._version_manager.restore_backup(backup_path)
+                return
+            
+            logger.info(f"Updated to {new_commit[:8]}, waiting for connection verification...")
+            
+            # Avvia health check: se non ci connettiamo entro il timeout, rollback
+            self._connection_verified = False
+            self._health_check_task = asyncio.create_task(self._health_check_after_update(new_commit, backup_path))
+            
+        except Exception as e:
+            logger.error(f"Error during startup update check: {e}", exc_info=True)
+    
+    async def _health_check_after_update(self, new_commit: str, backup_path: str):
+        """
+        Health check dopo update: verifica connessione entro timeout.
+        Se fallisce, esegue rollback automatico.
+        """
+        if not self._version_manager:
+            return
+        
+        timeout = self._version_manager.health_check_timeout
+        check_interval = 10  # Verifica ogni 10 secondi
+        elapsed = 0
+        
+        logger.info(f"Health check started: waiting up to {timeout}s for connection...")
+        
+        while elapsed < timeout:
+            await asyncio.sleep(check_interval)
+            elapsed += check_interval
+            
+            if self._connection_verified:
+                logger.success(f"Version {new_commit[:8]} verified as stable (connected successfully)")
+                # Versione stabile, rimuovi il flag di restart se presente
+                restart_flag = Path(self._version_manager.agent_dir) / ".restart_required"
+                if restart_flag.exists():
+                    restart_flag.unlink()
+                return
+        
+        # Timeout: rollback automatico
+        logger.error(f"Health check failed: no connection after {timeout}s, rolling back...")
+        self._version_manager.mark_version_bad(new_commit)
+        
+        if self._version_manager.restore_backup(backup_path):
+            logger.info("Rollback completed, restarting container...")
+            # Crea flag per restart (il container si riavvierà)
+            restart_flag = Path(self._version_manager.agent_dir) / ".restart_required"
+            restart_flag.touch()
+            
+            # Termina l'agent per forzare restart
+            await asyncio.sleep(2)
+            logger.info("Shutting down to trigger container restart...")
+            await self.shutdown()
+            os._exit(1)  # Exit forzato per triggerare restart policy
+    
     async def _handle_update_command(self, download_url: str, checksum: str) -> bool:
         """Handler per comando update"""
         result = await self._updater.update(
