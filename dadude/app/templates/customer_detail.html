@@ -2987,6 +2987,17 @@ async function loadInventory() {
                     buttons += '<button class="btn btn-outline-info" onclick="manageHPArubaDevice(\'' + dev.id + '\', \'' + (dev.primary_ip || '') + '\')" title="Info Switch"><i class="bi bi-ethernet"></i></button>';
                 }
                 
+                // Verifica se è Proxmox
+                const isProxmox = devType === 'proxmox' || 
+                                 osFamily.includes('proxmox') ||
+                                 (dev.hostname && dev.hostname.toLowerCase().includes('proxmox')) ||
+                                 (dev.name && dev.name.toLowerCase().includes('proxmox')) ||
+                                 openPorts.includes('8006'); // Porta web Proxmox
+                
+                if (isProxmox) {
+                    buttons += '<button class="btn btn-outline-primary" onclick="backupProxmoxDevice(\'' + dev.id + '\', \'' + (dev.primary_ip || '') + '\')" title="Backup Configurazione Proxmox"><i class="bi bi-download"></i></button>';
+                }
+                
                 return buttons;
             }
             // Ordina per IP (numericamente)
