@@ -48,12 +48,12 @@
 # 3. Verifica o scarica l'immagine Docker
 # ==========================================
 :local imagePath ""
-:local imageFound false
+:local imageFound 0
 
 # Cerca l'immagine in diverse posizioni
 :if ([/file/print where name=("/$usbDisk/$imageFile")] != "") do={
     :set imagePath ("/$usbDisk/$imageFile")
-    :set imageFound true
+    :set imageFound 1
     :put "✅ Immagine trovata su /$usbDisk/"
 } else={
     :if ([/file/print where name=("/$imageFile")] != "") do={
@@ -61,18 +61,18 @@
         :do {
             /file/move source=("/$imageFile") destination=("/$usbDisk/$imageFile")
             :set imagePath ("/$usbDisk/$imageFile")
-            :set imageFound true
+            :set imageFound 1
             :put "✅ Immagine spostata su /$usbDisk/"
         } on-error={
             :put "⚠️  Impossibile spostare, uso quella in root"
             :set imagePath ("/$imageFile")
-            :set imageFound true
+            :set imageFound 1
         }
     }
 }
 
 # Se non trovata, scarica
-:if (not $imageFound) do={
+:if ($imageFound = 0) do={
     :put "Immagine non trovata, scaricando da GitHub Releases..."
     :put "URL: $imageUrl"
     :put "Questo potrebbe richiedere alcuni minuti (file ~100-200MB)..."
@@ -85,7 +85,7 @@
             /tool/fetch url=$imageUrl dst=("/$imageFile") mode=http
             :set imagePath ("/$imageFile")
         } on-error={
-            :error "Errore durante il download dell'immagine!"
+            :put "Errore durante il download dell'immagine!"
             :put "Verifica:"
             :put "  - Connessione internet attiva"
             :put "  - URL GitHub Releases accessibile"
@@ -103,28 +103,35 @@
             :if ([/file/print where name=("/$imageFile")] != "") do={
                 :set imagePath ("/$imageFile")
             } else={
-                :error "Download fallito! Verifica la connessione internet e riprova."
+                :put "Download fallito! Verifica la connessione internet e riprova."
             }
         }
     }
     
-    # Verifica dimensione file (deve essere > 1MB)
-    :local fileSize 0
-    :do {
-        :set fileSize ([/file/get $imagePath size])
-    } on-error={}
-    
-    :if ($fileSize < 1048576) do={
-        :error "File scaricato troppo piccolo! Potrebbe essere un errore. Dimensione: $fileSize bytes"
+    # Verifica dimensione file solo se trovato
+    :if ($imagePath != "") do={
+        :local fileSize 0
+        :do {
+            :set fileSize ([/file/get $imagePath size])
+        } on-error={
+            :set fileSize 0
+        }
+        
+        :if ($fileSize < 1048576) do={
+            :put "⚠️  File scaricato potrebbe essere incompleto. Dimensione: $fileSize bytes"
+        } else={
+            :put "✅ Immagine scaricata con successo! Dimensione: $fileSize bytes"
+            :put "   Percorso: $imagePath"
+        }
     }
-    
-    :put "✅ Immagine scaricata con successo! Dimensione: $fileSize bytes"
-    :put "   Percorso: $imagePath"
 }
 
 # Aggiorna imageFile con il percorso corretto
 :if ($imagePath != "") do={
     :set imageFile ($imagePath)
+} else={
+    :put "⚠️  Nessuna immagine trovata o scaricata!"
+    :put "Verifica manualmente che l'immagine esista o che il download sia completato."
 }
 
 # ==========================================
