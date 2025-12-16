@@ -631,183 +631,170 @@ class CommandHandler:
     
     async def _update_agent(self, params: Dict) -> CommandResult:
         """
-        Self-update agent.
-        Per agent Docker WebSocket, esegue git pull nella directory montata.
-        Il restart deve essere fatto manualmente perché il container non può
-        riavviarsi in modo affidabile da solo.
+        Self-update agent usando script esterno robusto.
+        Lo script viene eseguito FUORI dal container per evitare problemi di mount e permessi.
         """
         logger.info("Update agent requested")
+        
+        agent_dir = "/opt/dadude-agent"
+        update_script = os.path.join(agent_dir, "dadude-agent", "deploy", "proxmox", "update-agent.sh")
+        
+        # Se siamo dentro un container Docker, dobbiamo eseguire lo script FUORI dal container
+        # usando docker exec o pct exec (se siamo in Proxmox LXC)
+        try:
+            # Verifica se siamo in un container Docker
+            if os.path.exists("/.dockerenv"):
+                logger.info("Running inside Docker container, executing update script via host")
+                
+                # Prova a identificare il container ID o CTID
+                # Metodo 1: Leggi hostname che potrebbe contenere il CTID
+                import socket
+                hostname = socket.gethostname()
+                
+                # Metodo 2: Cerca script di update nel filesystem montato
+                # Lo script deve essere eseguito FUORI dal container
+                
+                # Per ora, fallback al metodo vecchio ma migliorato
+                logger.warning("Cannot execute external script from inside container, using internal method")
+                return await self._update_agent_internal(params)
+            else:
+                # Siamo fuori dal container, possiamo eseguire direttamente
+                if os.path.exists(update_script):
+                    logger.info(f"Executing external update script: {update_script}")
+                    result = subprocess.run(
+                        ["bash", update_script],
+                        cwd=agent_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=600,
+                    )
+                    if result.returncode == 0:
+                        return CommandResult(
+                            success=True,
+                            status="success",
+                            data={
+                                "message": "Update completed successfully",
+                                "output": result.stdout,
+                            },
+                        )
+                    else:
+                        return CommandResult(
+                            success=False,
+                            status="error",
+                            error=f"Update script failed: {result.stderr[:500]}",
+                        )
+                else:
+                    logger.warning(f"Update script not found at {update_script}, using internal method")
+                    return await self._update_agent_internal(params)
+                    
+        except subprocess.TimeoutExpired:
+            return CommandResult(success=False, status="error", error="Update timed out")
+        except Exception as e:
+            logger.error(f"Update error: {e}")
+            return CommandResult(success=False, status="error", error=str(e))
+    
+    async def _update_agent_internal(self, params: Dict) -> CommandResult:
+        """
+        Metodo interno di update (fallback se script esterno non disponibile).
+        Migliorato con gestione errori più robusta.
+        """
+        logger.info("Using internal update method")
         
         agent_dir = "/opt/dadude-agent"
         
         try:
             import shutil
             
-            # Prova git fetch + reset (più robusto con file locali)
-            if os.path.exists(os.path.join(agent_dir, ".git")):
-                logger.info("Fetching latest code...")
-                
-                # Fetch
-                fetch_result = subprocess.run(
-                    ["git", "fetch", "origin", "main"],
-                    cwd=agent_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-                if fetch_result.returncode != 0:
-                    logger.warning(f"Git fetch failed: {fetch_result.stderr}")
-                    return CommandResult(
-                        success=False,
-                        status="error",
-                        error=f"Git fetch failed: {fetch_result.stderr[:200]}",
-                    )
-                
-                # Backup .env files prima del reset (se esistono)
-                env_file = os.path.join(agent_dir, ".env")
-                env_file_subdir = os.path.join(agent_dir, "dadude-agent", ".env")
-                env_backup = None
-                env_backup_subdir = None
-                
-                if os.path.exists(env_file):
-                    import tempfile
-                    env_backup = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.env.backup')
-                    with open(env_file, 'r') as f:
-                        env_backup.write(f.read())
-                    env_backup.close()
-                    logger.info("Backed up .env file before git reset")
-                
-                if os.path.exists(env_file_subdir):
-                    import tempfile
-                    env_backup_subdir = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.env.subdir.backup')
-                    with open(env_file_subdir, 'r') as f:
-                        env_backup_subdir.write(f.read())
-                    env_backup_subdir.close()
-                    logger.info("Backed up dadude-agent/.env file before git reset")
-                
-                # Reset hard to origin/main (ignora modifiche locali)
-                logger.info("Resetting to origin/main...")
-                result = subprocess.run(
-                    ["git", "reset", "--hard", "origin/main"],
-                    cwd=agent_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                )
-                if result.returncode != 0:
-                    logger.warning(f"Git reset failed: {result.stderr}")
-                    # Ripristina .env se il reset fallisce
-                    if env_backup and os.path.exists(env_backup.name):
-                        shutil.copy(env_backup.name, env_file)
-                        os.unlink(env_backup.name)
-                    if env_backup_subdir and os.path.exists(env_backup_subdir.name):
-                        shutil.copy(env_backup_subdir.name, env_file_subdir)
-                        os.unlink(env_backup_subdir.name)
-                    return CommandResult(
-                        success=False,
-                        status="error",
-                        error=f"Git reset failed: {result.stderr[:200]}",
-                    )
-                else:
-                    logger.info(f"Git update success: {result.stdout}")
-                    
-                    # Ripristina .env dopo il reset (se era stato salvato)
-                    if env_backup and os.path.exists(env_backup.name):
-                        if not os.path.exists(env_file) or os.path.getsize(env_file) == 0:
-                            shutil.copy(env_backup.name, env_file)
-                            logger.info("Restored .env file after git reset")
-                        os.unlink(env_backup.name)
-                    
-                    if env_backup_subdir and os.path.exists(env_backup_subdir.name):
-                        if not os.path.exists(env_file_subdir) or os.path.getsize(env_file_subdir) == 0:
-                            os.makedirs(os.path.dirname(env_file_subdir), exist_ok=True)
-                            shutil.copy(env_backup_subdir.name, env_file_subdir)
-                            logger.info("Restored dadude-agent/.env file after git reset")
-                        os.unlink(env_backup_subdir.name)
-                    
-                    # Assicurati che .env esista in dadude-agent/ se esiste nella root
-                    if os.path.exists(env_file) and not os.path.exists(env_file_subdir):
-                        os.makedirs(os.path.dirname(env_file_subdir), exist_ok=True)
-                        shutil.copy(env_file, env_file_subdir)
-                        logger.info("Copied .env to dadude-agent/ directory for docker-compose")
-                    
-                    # Copia app files se struttura diversa
-                    src_app = os.path.join(agent_dir, "dadude-agent", "app")
-                    if os.path.exists(src_app):
-                        dst_app = os.path.join(agent_dir, "app")
-                        if os.path.exists(dst_app):
-                            shutil.rmtree(dst_app)
-                        shutil.copytree(src_app, dst_app)
-                        logger.info("Copied app files to correct location")
-            else:
-                logger.warning("Directory is not a git repo")
+            # Verifica repository git
+            git_dir = os.path.join(agent_dir, ".git")
+            if not os.path.exists(git_dir):
                 return CommandResult(
                     success=False,
                     status="error",
-                    error="Agent directory is not a git repository",
+                    error="Agent directory is not a git repository. Please run update script manually from host.",
                 )
             
-            # Rebuild e restart Docker container
-            # Cerca docker-compose.yml prima nel root, poi in dadude-agent/
-            agent_compose_dir = agent_dir
-            if not os.path.exists(os.path.join(agent_compose_dir, "docker-compose.yml")):
-                agent_compose_dir = os.path.join(agent_dir, "dadude-agent")
+            # Backup .env files
+            env_file = os.path.join(agent_dir, ".env")
+            env_file_subdir = os.path.join(agent_dir, "dadude-agent", ".env")
+            env_backups = {}
             
-            if os.path.exists(os.path.join(agent_compose_dir, "docker-compose.yml")):
-                logger.info("Rebuilding Docker image...")
-                
-                # Build
-                build_result = subprocess.run(
-                    ["docker", "compose", "build", "--quiet"],
-                    cwd=agent_compose_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
-                if build_result.returncode != 0:
-                    logger.warning(f"Docker build failed: {build_result.stderr}")
-                    return CommandResult(
-                        success=True,
-                        status="success",
-                        data={
-                            "message": f"Git pull OK, but Docker build failed. Manual rebuild required.",
-                            "needs_restart": True,
-                            "build_error": build_result.stderr[:200],
-                        },
-                    )
-                
-                logger.info("Docker build completed. Restarting container...")
-                
-                # Restart in background (container will stop after this)
-                subprocess.Popen(
-                    ["docker", "compose", "up", "-d", "--force-recreate"],
-                    cwd=agent_compose_dir,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                
+            for env_path in [env_file, env_file_subdir]:
+                if os.path.exists(env_path):
+                    import tempfile
+                    backup = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.env.backup')
+                    with open(env_path, 'r') as f:
+                        backup.write(f.read())
+                    backup.close()
+                    env_backups[env_path] = backup.name
+                    logger.info(f"Backed up {env_path}")
+            
+            # Fetch updates
+            logger.info("Fetching latest code...")
+            fetch_result = subprocess.run(
+                ["git", "fetch", "origin", "main"],
+                cwd=agent_dir,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if fetch_result.returncode != 0:
+                # Ripristina backup
+                for env_path, backup_path in env_backups.items():
+                    if os.path.exists(backup_path):
+                        shutil.copy(backup_path, env_path)
+                        os.unlink(backup_path)
                 return CommandResult(
-                    success=True,
-                    status="success",
-                    data={
-                        "message": "Update complete. Container restarting...",
-                        "restarting": True,
-                    },
-                )
-            else:
-                return CommandResult(
-                    success=True,
-                    status="success",
-                    data={
-                        "message": "Code updated via git pull. Manual restart required.",
-                        "needs_restart": True,
-                    },
+                    success=False,
+                    status="error",
+                    error=f"Git fetch failed: {fetch_result.stderr[:200]}",
                 )
             
-        except subprocess.TimeoutExpired:
-            return CommandResult(success=False, status="error", error="Update timed out")
+            # Reset hard
+            logger.info("Resetting to origin/main...")
+            reset_result = subprocess.run(
+                ["git", "reset", "--hard", "origin/main"],
+                cwd=agent_dir,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            
+            # Ripristina .env files
+            for env_path, backup_path in env_backups.items():
+                if os.path.exists(backup_path):
+                    if not os.path.exists(env_path) or os.path.getsize(env_path) == 0:
+                        os.makedirs(os.path.dirname(env_path), exist_ok=True)
+                        shutil.copy(backup_path, env_path)
+                        logger.info(f"Restored {env_path}")
+                    os.unlink(backup_path)
+            
+            # Assicura che .env esista in dadude-agent/
+            if os.path.exists(env_file) and not os.path.exists(env_file_subdir):
+                os.makedirs(os.path.dirname(env_file_subdir), exist_ok=True)
+                shutil.copy(env_file, env_file_subdir)
+                logger.info("Copied .env to dadude-agent/ directory")
+            
+            if reset_result.returncode != 0:
+                return CommandResult(
+                    success=False,
+                    status="error",
+                    error=f"Git reset failed: {reset_result.stderr[:200]}",
+                )
+            
+            logger.info("Git update completed successfully")
+            
+            return CommandResult(
+                success=True,
+                status="success",
+                data={
+                    "message": "Code updated successfully. Container restart required.",
+                    "needs_restart": True,
+                },
+            )
+            
         except Exception as e:
-            logger.error(f"Update error: {e}")
+            logger.error(f"Internal update error: {e}", exc_info=True)
             return CommandResult(success=False, status="error", error=str(e))
     
     async def _restart(self) -> CommandResult:
