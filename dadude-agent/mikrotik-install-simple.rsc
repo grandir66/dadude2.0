@@ -72,23 +72,33 @@
 :local imageFound 0
 
 # Cerca l'immagine in diverse posizioni
-:if ([/file/print where name=("/$usbDisk/$imageFile")] != "") do={
-    :set imagePath ("/$usbDisk/$imageFile")
-    :set imageFound 1
-    :put "Immagine trovata su /$usbDisk/"
-} else={
-    :if ([/file/print where name=("/$imageFile")] != "") do={
-        :put "Immagine trovata in root, spostando su /$usbDisk/..."
-        :do {
-            /file/move source=("/$imageFile") destination=("/$usbDisk/$imageFile")
-            :set imagePath ("/$usbDisk/$imageFile")
-            :set imageFound 1
-            :put "Immagine spostata su /$usbDisk/"
-        } on-error={
-            :put "Impossibile spostare, uso quella in root"
-            :set imagePath ("/$imageFile")
-            :set imageFound 1
+:if ($usbFound = 1) do={
+    :local usbImagePath ($usbPath . "/" . $imageFile)
+    :if ([/file/print where name=$usbImagePath] != "") do={
+        :set imagePath $usbImagePath
+        :set imageFound 1
+        :put ("Immagine trovata su " . $usbImagePath)
+    } else={
+        :if ([/file/print where name=("/" . $imageFile)] != "") do={
+            :put ("Immagine trovata in root, spostando su " . $usbImagePath . "...")
+            :do {
+                /file/move source=("/" . $imageFile) destination=$usbImagePath
+                :set imagePath $usbImagePath
+                :set imageFound 1
+                :put ("Immagine spostata su " . $usbImagePath)
+            } on-error={
+                :put "Impossibile spostare, uso quella in root"
+                :set imagePath ("/" . $imageFile)
+                :set imageFound 1
+            }
         }
+    }
+} else={
+    # Se USB non trovato, cerca solo in root
+    :if ([/file/print where name=("/" . $imageFile)] != "") do={
+        :set imagePath ("/" . $imageFile)
+        :set imageFound 1
+        :put ("Immagine trovata in root: " . $imagePath)
     }
 }
 
@@ -220,19 +230,30 @@
 
 # ==========================================
 # 9. Crea environment variables
-# NOTA: RouterOS richiede valori letterali, non variabili nelle value
+# NOTA: RouterOS richiede valori letterali o concatenazione corretta
 # ==========================================
-/container/envs/add name=dadude-env key=DADUDE_SERVER_URL value=("https://dadude.domarc.it:8000")
-/container/envs/add name=dadude-env key=DADUDE_AGENT_TOKEN value=("mio-token-rb5009")
-/container/envs/add name=dadude-env key=DADUDE_AGENT_ID value=("agent-rb5009-test")
-/container/envs/add name=dadude-env key=DADUDE_AGENT_NAME value=("RB5009 Test")
-/container/envs/add name=dadude-env key=DADUDE_DNS_SERVERS value=("192.168.4.1,8.8.8.8")
+/container/envs/add name=dadude-env key=DADUDE_SERVER_URL value=$serverUrl
+/container/envs/add name=dadude-env key=DADUDE_AGENT_TOKEN value=$agentToken
+/container/envs/add name=dadude-env key=DADUDE_AGENT_ID value=$agentId
+/container/envs/add name=dadude-env key=DADUDE_AGENT_NAME value=$agentName
+/container/envs/add name=dadude-env key=DADUDE_DNS_SERVERS value=$dnsServers
 /container/envs/add name=dadude-env key=PYTHONUNBUFFERED value="1"
 
 # ==========================================
 # 10. Crea container dall'immagine tar sul disco USB
 # ==========================================
-/container/add file=$imageFile interface=veth-dadude-agent root-dir=("/$usbDisk/dadude-agent") envlist=dadude-env start-on-boot=yes logging=yes cmd="python -m app.agent"
+:if ($imagePath != "") do={
+    :local rootDir ""
+    :if ($usbFound = 1) do={
+        :set rootDir ($usbPath . "/dadude-agent")
+    } else={
+        :set rootDir "/dadude-agent"
+    }
+    /container/add file=$imagePath interface=veth-dadude-agent root-dir=$rootDir envlist=dadude-env start-on-boot=yes logging=yes cmd="python -m app.agent"
+} else={
+    :put "ERRORE: Nessun file immagine trovato! Impossibile creare il container."
+    :put "Verifica che l'immagine esista o che il download sia completato."
+}
 
 # ==========================================
 # 11. Avvia container
