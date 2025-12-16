@@ -423,6 +423,22 @@ class DaDudeAgent:
         try:
             import httpx
             import platform
+            import re
+            
+            # Leggi la versione direttamente dal file invece di usare la costante in memoria
+            # Questo assicura che dopo un update, venga inviata la versione corretta
+            agent_version = AGENT_VERSION
+            try:
+                agent_file = Path(__file__).parent / "agent.py"
+                if agent_file.exists():
+                    content = agent_file.read_text()
+                    match = re.search(r'AGENT_VERSION\s*=\s*["\']([^"\']+)["\']', content)
+                    if match:
+                        agent_version = match.group(1)
+                        if agent_version != AGENT_VERSION:
+                            logger.info(f"Version mismatch detected: memory={AGENT_VERSION}, file={agent_version}, using file version")
+            except Exception as e:
+                logger.warning(f"Could not read version from file: {e}, using memory version")
             
             # Non inviamo detected_ip - il server lo rileverà dalla connessione HTTP
             # Questo evita problemi con IP interni Docker
@@ -431,7 +447,7 @@ class DaDudeAgent:
                 "agent_id": self.agent_id,
                 "agent_name": self.agent_name,
                 "agent_type": "docker",
-                "version": AGENT_VERSION,
+                "version": agent_version,
                 "agent_token": self.settings.agent_token,  # Invia token per sincronizzazione
                 "detected_ip": None,  # Server userà request.client.host
                 "detected_hostname": platform.node(),
