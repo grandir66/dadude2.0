@@ -323,29 +323,52 @@ cat > "$INSTALL_SCRIPT" <<'ROUTEROS_SCRIPT'
 ROUTEROS_SCRIPT
 
 # Sostituisci i placeholder con i valori reali
+# Usa un separatore diverso per evitare conflitti con URL che contengono /
 sed -i '' "s|SERVER_URL_PLACEHOLDER|$SERVER_URL|g" "$INSTALL_SCRIPT"
 sed -i '' "s|AGENT_TOKEN_PLACEHOLDER|$AGENT_TOKEN|g" "$INSTALL_SCRIPT"
 sed -i '' "s|AGENT_ID_PLACEHOLDER|$AGENT_ID|g" "$INSTALL_SCRIPT"
 sed -i '' "s|AGENT_NAME_PLACEHOLDER|$AGENT_NAME|g" "$INSTALL_SCRIPT"
 sed -i '' "s|IMAGE_FILE_PLACEHOLDER|$IMAGE_FILE|g" "$INSTALL_SCRIPT"
 sed -i '' "s|USB_DISK_PLACEHOLDER|$USB_DISK|g" "$INSTALL_SCRIPT"
+# Per URL, usa un separatore diverso per evitare problemi con i caratteri speciali
 sed -i '' "s|IMAGE_URL_PLACEHOLDER|$IMAGE_URL|g" "$INSTALL_SCRIPT"
+
+# Verifica che le sostituzioni siano avvenute
+if grep -q "PLACEHOLDER" "$INSTALL_SCRIPT"; then
+    echo -e "${YELLOW}⚠️  Attenzione: alcuni placeholder non sono stati sostituiti${NC}"
+    grep "PLACEHOLDER" "$INSTALL_SCRIPT" | head -5
+fi
 
 echo -e "${GREEN}✅ Script RouterOS generato: $INSTALL_SCRIPT${NC}"
 echo ""
 
-# Step 7: Esegui automaticamente lo script RouterOS
-echo -e "${BLUE}[7/7] Eseguendo script di installazione sul router...${NC}"
-echo -e "${YELLOW}NOTA: Lo script viene eseguito automaticamente via SSH${NC}"
+# Step 7: Carica ed esegui lo script RouterOS
+echo -e "${BLUE}[7/7] Caricando ed eseguendo script di installazione sul router...${NC}"
+echo -e "${YELLOW}NOTA: Lo script viene caricato sul router e poi eseguito con /import${NC}"
 echo ""
 
-ssh -o StrictHostKeyChecking=no admin@$ROUTER_IP < "$INSTALL_SCRIPT" || {
-    echo -e "${RED}❌ Errore durante l'installazione${NC}"
+# Carica lo script sul router
+scp -o StrictHostKeyChecking=no "$INSTALL_SCRIPT" admin@$ROUTER_IP:/tmp/dadude-install.rsc || {
+    echo -e "${YELLOW}⚠️  Impossibile caricare via SCP, provo metodo alternativo...${NC}"
+    # Metodo alternativo: esegui direttamente via SSH
+    ssh -o StrictHostKeyChecking=no admin@$ROUTER_IP "$(cat "$INSTALL_SCRIPT")" || {
+        echo -e "${RED}❌ Errore durante l'installazione${NC}"
+        echo ""
+        echo "Esegui manualmente lo script:"
+        echo "  1. Copia il contenuto di: $INSTALL_SCRIPT"
+        echo "  2. Incollalo nella console RouterOS (Winbox o SSH)"
+        exit 1
+    }
+    exit 0
+}
+
+# Esegui lo script sul router
+ssh -o StrictHostKeyChecking=no admin@$ROUTER_IP "/import file-name=tmp/dadude-install.rsc" || {
+    echo -e "${RED}❌ Errore durante l'esecuzione dello script${NC}"
     echo ""
-    echo "Puoi eseguire manualmente lo script con:"
-    echo "  ssh admin@$ROUTER_IP < $INSTALL_SCRIPT"
-    echo ""
-    echo "Oppure copia il contenuto di $INSTALL_SCRIPT e incollalo nella console RouterOS"
+    echo "Lo script è stato caricato su /tmp/dadude-install.rsc"
+    echo "Puoi eseguirlo manualmente con:"
+    echo "  ssh admin@$ROUTER_IP '/import file-name=tmp/dadude-install.rsc'"
     exit 1
 }
 
