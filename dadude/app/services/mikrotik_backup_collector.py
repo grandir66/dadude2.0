@@ -155,16 +155,45 @@ class MikroTikBackupCollector:
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-            self.logger.info(f"Connecting to MikroTik {host} for backup...")
-            client.connect(
-                hostname=host,
-                port=port,
-                username=username,
-                password=password,
-                timeout=self.timeout,
-                allow_agent=False,
-                look_for_keys=False
-            )
+            self.logger.info(f"Connecting to MikroTik {host}:{port} for backup (SSH required)...")
+            
+            # Prova connessione con timeout più lungo per MikroTik
+            try:
+                client.connect(
+                    hostname=host,
+                    port=port,
+                    username=username,
+                    password=password,
+                    timeout=self.timeout,
+                    allow_agent=False,
+                    look_for_keys=False,
+                    banner_timeout=30  # Timeout più lungo per banner SSH
+                )
+            except paramiko.ssh_exception.SSHException as e:
+                if "Error reading SSH protocol banner" in str(e) or "timeout" in str(e).lower():
+                    error_msg = (
+                        f"SSH connection failed to {host}:{port}. "
+                        f"MikroTik backup requires SSH to be enabled. "
+                        f"Please enable SSH service on the router or verify the SSH port is correct. "
+                        f"Error: {str(e)}"
+                    )
+                    self.logger.error(error_msg)
+                    return {
+                        "success": False,
+                        "error": error_msg
+                    }
+                raise
+            except Exception as e:
+                error_msg = (
+                    f"Failed to connect to MikroTik {host}:{port} via SSH. "
+                    f"Please verify: 1) SSH is enabled on the router, 2) SSH port is correct ({port}), "
+                    f"3) Credentials are valid. Error: {str(e)}"
+                )
+                self.logger.error(error_msg)
+                return {
+                    "success": False,
+                    "error": error_msg
+                }
 
             # Raccolta info device
             device_info = self._get_device_info(client)

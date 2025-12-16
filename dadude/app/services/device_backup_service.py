@@ -573,10 +573,14 @@ class DeviceBackupService:
             password = None
         
         # Determina porta in base al tipo device
+        # Per MikroTik: usa ssh_port se disponibile, altrimenti porta 22
+        # NOTA: mikrotik_api_port è per l'API (8728), non per SSH
         if device_type == "mikrotik":
-            port = cred.mikrotik_api_port if hasattr(cred, 'mikrotik_api_port') and cred.mikrotik_api_port else (cred.ssh_port or 22)
+            # Per backup MikroTik serve SSH, non l'API
+            port = cred.ssh_port if hasattr(cred, 'ssh_port') and cred.ssh_port else 22
+            self.logger.info(f"_get_credential_by_id: Using SSH port {port} for MikroTik backup")
         else:
-            port = cred.ssh_port or 22
+            port = cred.ssh_port if hasattr(cred, 'ssh_port') and cred.ssh_port else 22
         
         result = {
             "credential_id": cred.id,
@@ -627,10 +631,13 @@ class DeviceBackupService:
             password = None
 
         # Determina porta in base al tipo device
+        # Per MikroTik backup serve SSH, non l'API (mikrotik_api_port è per l'API RouterOS)
         if device_type == "mikrotik":
-            port = cred.mikrotik_api_port or 8728
+            # Per backup MikroTik serve SSH, usa ssh_port se disponibile, altrimenti porta 22
+            port = cred.ssh_port if hasattr(cred, 'ssh_port') and cred.ssh_port else 22
+            self.logger.info(f"_get_customer_default_credentials: Using SSH port {port} for MikroTik backup")
         else:
-            port = cred.ssh_port or 22
+            port = cred.ssh_port if hasattr(cred, 'ssh_port') and cred.ssh_port else 22
 
         return {
             "credential_id": cred.id,
