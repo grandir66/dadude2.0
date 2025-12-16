@@ -529,3 +529,191 @@ async def cleanup_old_backups(
     except Exception as e:
         logger.error(f"Cleanup API error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==========================================
+# FILE BROWSER ENDPOINTS
+# ==========================================
+
+@router.get("/files/list")
+async def list_backup_files(
+    device_type: Optional[str] = Query(None, description="Filtra per tipo device (mikrotik, hp_aruba)"),
+    customer_code: Optional[str] = Query(None, description="Filtra per codice cliente"),
+    path: Optional[str] = Query("", description="Path relativo nella directory backup"),
+    service: DeviceBackupService = Depends(get_backup_service)
+):
+    """
+    Elenca file di backup disponibili
+    
+    Restituisce struttura directory con file e metadata
+    """
+    try:
+        backup_path = service.backup_base_path
+        
+        # Costruisci path completo
+        if path:
+            # Sanitizza path per evitare directory traversal
+            safe_path = os.path.normpath(path).lstrip('/')
+            if '..' in safe_path or safe_path.startswith('/'):
+                raise HTTPException(status_code=400, detail="Invalid path")
+            full_path = os.path.join(backup_path, safe_path)
+        else:
+            full_path = backup_path
+        
+        # Verifica che il path sia dentro backup_path
+        full_path = os.path.abspath(full_path)
+        backup_path_abs = os.path.abspath(backup_path)
+        if not full_path.startswith(backup_path_abs):
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        if not os.path.exists(full_path):
+            raise HTTPException(status_code=404, detail="Path not found")
+        
+        items = []
+        
+        # Se è una directory, elenca contenuto
+        if os.path.isdir(full_path):
+            for item_name in sorted(os.listdir(full_path)):
+                item_path = os.path.join(full_path, item_name)
+                rel_path = os.path.relpath(item_path, backup_path)
+                
+                stat = os.stat(item_path)
+                is_dir = os.path.isdir(item_path)
+                
+                item_info = {
+                    "name": item_name,
+                    "path": rel_path.replace('\\', '/'),  # Normalizza separatori
+                    "type": "directory" if is_dir else "file",
+                    "size": stat.st_size if not is_dir else None,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                }
+                
+                # Filtri
+                if device_type and not rel_path.startswith(device_type):
+                    continue
+                if customer_code and customer_code not in rel_path:
+                    continue
+                
+                items.append(item_info)
+        else:
+            # È un file singolo
+            stat = os.stat(full_path)
+            rel_path = os.path.relpath(full_path, backup_path)
+            items.append({
+                "name": os.path.basename(full_path),
+                "path": rel_path.replace('\\', '/'),
+                "type": "file",
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            })
+        
+        return {
+            "success": True,
+            "path": path or "/",
+            "items": items,
+            "total": len(items)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing backup files: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/files/download")
+async def download_backup_file(
+    path: str = Query(..., description="Path relativo del file da scaricare"),
+    service: DeviceBackupService = Depends(get_backup_service)
+):
+    """
+    Scarica un file di backup
+    """
+    try:
+        backup_path = service.backup_base_path
+        
+        # Sanitizza path
+        safe_path = os.path.normpath(path).lstrip('/')
+        if '..' in safe_path or safe_path.startswith('/'):
+            raise HTTPException(status_code=400, detail="Invalid path")
+        
+        full_path = os.path.join(backup_path, safe_path)
+        
+        # Verifica sicurezza
+        full_path = os.path.abspath(full_path)
+        backup_path_abs = os.path.abspath(backup_path)
+        if not full_path.startswith(backup_path_abs):
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        if not os.path.exists(full_path):
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        if os.path.isdir(full_path):
+            raise HTTPException(status_code=400, detail="Path is a directory, not a file")
+        
+        # Determina media type
+        ext = os.path.splitext(full_path)[1].lower()
+        media_types = {
+            '.rsc': 'text/plain',
+            '.backup': 'application/octet-stream',
+            '.txt': 'text/plain',
+            '.cfg': 'text/plain',
+            '.conf': 'text/plain',
+        }
+        media_type = media_types.get(ext, 'application/octet-stream')
+        
+        return FileResponse(
+            full_path,
+            media_type=media_type,
+            filename=os.path.basename(full_path),
+            headers={
+                "Content-Disposition": f'attachment; filename="{os.path.basename(full_path)}"'
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading backup file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/files/delete")
+async def delete_backup_file(
+    path: str = Query(..., description="Path relativo del file da eliminare"),
+    service: DeviceBackupService = Depends(get_backup_service)
+):
+    """
+    Elimina un file di backup
+    """
+    try:
+        backup_path = service.backup_base_path
+        
+        # Sanitizza path
+        safe_path = os.path.normpath(path).lstrip('/')
+        if '..' in safe_path or safe_path.startswith('/'):
+            raise HTTPException(status_code=400, detail="Invalid path")
+        
+        full_path = os.path.join(backup_path, safe_path)
+        
+        # Verifica sicurezza
+        full_path = os.path.abspath(full_path)
+        backup_path_abs = os.path.abspath(backup_path)
+        if not full_path.startswith(backup_path_abs):
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        if not os.path.exists(full_path):
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        if os.path.isdir(full_path):
+            raise HTTPException(status_code=400, detail="Cannot delete directories via API")
+        
+        os.remove(full_path)
+        
+        return {"success": True, "message": "File deleted"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting backup file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
