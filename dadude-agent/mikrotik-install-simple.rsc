@@ -72,10 +72,10 @@
 # MODIFICA: Cambia il percorso se l'immagine è in una posizione diversa
 # ==========================================
 # Costruisci il comando con tutte le environment variables
-# NOTA: RouterOS potrebbe non supportare 'cd' nel comando, quindi proviamo senza
-# Se necessario, l'applicazione Python dovrebbe gestire il percorso correttamente
+# NOTA: RouterOS potrebbe avere problemi con il comando diretto, usiamo sh -c
+# Questo dovrebbe risolvere il problema "chdir: No such file or directory"
 :local cmdLine ""
-:set cmdLine ("DADUDE_SERVER_URL=https://dadude.domarc.it:8000 DADUDE_AGENT_TOKEN=" . $agentToken . " DADUDE_AGENT_ID=" . $agentId . " DADUDE_AGENT_NAME=" . $agentName . " DADUDE_DNS_SERVERS=192.168.4.1,8.8.8.8 PYTHONUNBUFFERED=1 python -m app.agent")
+:set cmdLine ("sh -c 'DADUDE_SERVER_URL=https://dadude.domarc.it:8000 DADUDE_AGENT_TOKEN=" . $agentToken . " DADUDE_AGENT_ID=" . $agentId . " DADUDE_AGENT_NAME=" . $agentName . " DADUDE_DNS_SERVERS=192.168.4.1,8.8.8.8 PYTHONUNBUFFERED=1 python -m app.agent'")
 
 # Prova prima con immagine su USB
 # NOTA: Usiamo 'cd /app &&' nel comando invece di workdir perché RouterOS potrebbe non supportarlo
