@@ -43,18 +43,19 @@
 # ==========================================
 :local imagePath ""
 
-# Cerca prima su USB
+# Cerca prima su USB (senza slash iniziale per RouterOS)
 :if ([/file/print where name=("usb1/" . $imageFile)] != "") do={
     :set imagePath ("usb1/" . $imageFile)
-    :put ("Immagine trovata su USB: " . $imagePath)
+    :put ("Immagine trovata su USB: usb1/" . $imageFile)
 } else={
-    # Cerca in root
+    # Cerca in root (con slash iniziale)
     :if ([/file/print where name=("/" . $imageFile)] != "") do={
         :set imagePath ("/" . $imageFile)
-        :put ("Immagine trovata in root: " . $imagePath)
+        :put ("Immagine trovata in root: /" . $imageFile)
     } else={
         :put "ERRORE: Immagine non trovata!"
         :put "Verifica che il file esista con: /file/print"
+        :put "Cerca: usb1/dadude-agent-mikrotik.tar.gz o /dadude-agent-mikrotik.tar.gz"
     }
 }
 
@@ -104,13 +105,14 @@
 
 # ==========================================
 # 8. Crea environment variables
-# NOTA: RouterOS richiede valori letterali, quindi usiamo le variabili direttamente
+# NOTA: RouterOS non accetta variabili nelle value, quindi usiamo valori letterali
+# Modifica questi valori se necessario
 # ==========================================
-/container/envs/add name=dadude-env key=DADUDE_SERVER_URL value=$serverUrl
-/container/envs/add name=dadude-env key=DADUDE_AGENT_TOKEN value=$agentToken
-/container/envs/add name=dadude-env key=DADUDE_AGENT_ID value=$agentId
-/container/envs/add name=dadude-env key=DADUDE_AGENT_NAME value=$agentName
-/container/envs/add name=dadude-env key=DADUDE_DNS_SERVERS value=$dnsServers
+/container/envs/add name=dadude-env key=DADUDE_SERVER_URL value="https://dadude.domarc.it:8000"
+/container/envs/add name=dadude-env key=DADUDE_AGENT_TOKEN value="mio-token-rb5009"
+/container/envs/add name=dadude-env key=DADUDE_AGENT_ID value="agent-rb5009-test"
+/container/envs/add name=dadude-env key=DADUDE_AGENT_NAME value="RB5009 Test"
+/container/envs/add name=dadude-env key=DADUDE_DNS_SERVERS value="192.168.4.1,8.8.8.8"
 /container/envs/add name=dadude-env key=PYTHONUNBUFFERED value="1"
 
 # ==========================================
