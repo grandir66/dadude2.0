@@ -302,12 +302,6 @@ class DudeService:
                     return []
                 logger.error(f"Error getting probes: {e}")
                 raise
-            self._connected = False
-            self._api = None
-            raise
-        except Exception as e:
-            logger.error(f"Error getting probes: {e}")
-            raise
     
     def get_server_info(self) -> DudeServerInfo:
         """Ottiene informazioni sul server Dude"""
