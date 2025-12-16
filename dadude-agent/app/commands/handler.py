@@ -802,26 +802,39 @@ class CommandHandler:
                 )
                 
                 if build_result.returncode == 0:
-                    logger.info("Docker build completed. Preparing for restart...")
+                    logger.info("Docker build completed. Restarting container...")
                     
-                    # Dopo il build, fermiamo il container normalmente
-                    # Il restart policy "unless-stopped" nel docker-compose.yml
-                    # riavvierà automaticamente il container con la nuova immagine
-                    # quando viene fermato normalmente
-                    
-                    # Ferma il container corrente (questo triggererà il restart automatico)
+                    # Usa docker restart invece di stop per forzare il riavvio
+                    # anche se il container è stato fermato manualmente
                     try:
-                        stop_result = subprocess.run(
-                            ["docker", "stop", "dadude-agent"],
+                        restart_result = subprocess.run(
+                            ["docker", "restart", "dadude-agent"],
                             capture_output=True,
-                            timeout=10,
+                            timeout=30,
                         )
-                        if stop_result.returncode == 0:
-                            logger.info("Container stopped. Docker will restart it automatically with new image.")
+                        if restart_result.returncode == 0:
+                            logger.info("Container restart initiated successfully.")
                         else:
-                            logger.warning(f"Could not stop container gracefully: {stop_result.stderr}")
+                            logger.warning(f"Could not restart container: {restart_result.stderr}")
+                            # Fallback: prova a fermare e riavviare manualmente
+                            try:
+                                subprocess.run(["docker", "stop", "dadude-agent"], timeout=5, capture_output=True)
+                                subprocess.Popen(
+                                    ["docker", "compose", "up", "-d", "--force-recreate"],
+                                    cwd=agent_compose_dir,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                )
+                                logger.info("Container restart via docker compose initiated.")
+                            except Exception as e2:
+                                logger.error(f"Fallback restart also failed: {e2}")
                     except Exception as e:
-                        logger.warning(f"Error stopping container: {e}")
+                        logger.error(f"Error restarting container: {e}")
+                        # Ultimo tentativo: ferma e lascia che restart policy lo riavvii
+                        try:
+                            subprocess.run(["docker", "stop", "dadude-agent"], timeout=5, capture_output=True)
+                        except:
+                            pass
                     
                     # Aspetta un momento per permettere al processo di completare
                     import asyncio
@@ -831,7 +844,7 @@ class CommandHandler:
                         success=True,
                         status="success",
                         data={
-                            "message": "Update completed. Container will restart automatically.",
+                            "message": "Update completed. Container restarting...",
                             "restarting": True,
                         },
                     )
