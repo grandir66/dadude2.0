@@ -11,6 +11,7 @@ from . import import_export
 from . import dashboard
 from . import discovery
 from . import mikrotik
+from . import hp_aruba
 from . import inventory
 from . import agents
 from . import device_backup
@@ -26,6 +27,7 @@ __all__ = [
     "dashboard",
     "discovery",
     "mikrotik",
+    "hp_aruba",
     "inventory",
     "agents",
     "device_backup",

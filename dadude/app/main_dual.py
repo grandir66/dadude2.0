@@ -24,7 +24,7 @@ from .services.websocket_hub import get_websocket_hub
 from .routers import (
     devices, probes, alerts, webhook, system, customers,
     import_export, dashboard, discovery, mikrotik, inventory, agents,
-    settings as settings_router, device_backup
+    settings as settings_router, device_backup, hp_aruba
 )
 
 
@@ -640,6 +640,7 @@ admin_app.include_router(webhook.router, prefix="/api/v1")
 admin_app.include_router(system.router, prefix="/api/v1")
 admin_app.include_router(customers.router, prefix="/api/v1")
 admin_app.include_router(mikrotik.router, prefix="/api/v1")
+admin_app.include_router(hp_aruba.router, prefix="/api/v1")
 admin_app.include_router(inventory.router, prefix="/api/v1")
 admin_app.include_router(import_export.router, prefix="/api/v1")
 admin_app.include_router(discovery.router, prefix="/api/v1")
