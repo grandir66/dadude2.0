@@ -699,7 +699,11 @@ class CommandHandler:
                 )
             
             # Rebuild e restart Docker container
-            agent_compose_dir = os.path.join(agent_dir, "dadude-agent")
+            # Cerca docker-compose.yml prima nel root, poi in dadude-agent/
+            agent_compose_dir = agent_dir
+            if not os.path.exists(os.path.join(agent_compose_dir, "docker-compose.yml")):
+                agent_compose_dir = os.path.join(agent_dir, "dadude-agent")
+            
             if os.path.exists(os.path.join(agent_compose_dir, "docker-compose.yml")):
                 logger.info("Rebuilding Docker image...")
                 
