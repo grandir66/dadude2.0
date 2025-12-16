@@ -99,6 +99,76 @@ async def unassign_agent_from_customer(agent_id: str):
 
 
 # ==========================================
+# ROUTER OPERATIONS (via Credentials - Direct)
+# ==========================================
+
+@router.get("/credentials/{credential_id}/system-info")
+async def get_router_system_info_by_credential(credential_id: str):
+    """Ottiene informazioni sistema del router tramite credenziale"""
+    from ..services.customer_service import get_customer_service
+    from ..services.mikrotik_service import get_mikrotik_service
+    
+    customer_service = get_customer_service()
+    credential = customer_service.get_credential(credential_id, include_password=True)
+    
+    if not credential:
+        raise HTTPException(status_code=404, detail="Credenziale non trovata")
+    
+    if credential.credential_type not in ["mikrotik", "ssh", "device"]:
+        raise HTTPException(status_code=400, detail="Credenziale non supporta MikroTik")
+    
+    mikrotik = get_mikrotik_service()
+    result = mikrotik.get_system_info(
+        address=credential.address or "",
+        port=credential.port or 8728,
+        username=credential.username or "admin",
+        password=credential.password or "",
+        use_ssl=credential.use_ssl if hasattr(credential, 'use_ssl') else False,
+    )
+    
+    return result
+
+
+@router.post("/credentials/{credential_id}/backup")
+async def backup_router_by_credential(
+    credential_id: str,
+    backup_type: str = Query("export", description="Tipo backup: export, binary, both"),
+):
+    """Esegue backup configurazione router tramite credenziale"""
+    from ..services.customer_service import get_customer_service
+    from ..services.mikrotik_backup_collector import MikroTikBackupCollector
+    import os
+    
+    customer_service = get_customer_service()
+    credential = customer_service.get_credential(credential_id, include_password=True)
+    
+    if not credential:
+        raise HTTPException(status_code=404, detail="Credenziale non trovata")
+    
+    # Determina customer per path backup
+    customer = None
+    if credential.customer_id:
+        customer = customer_service.get_customer(credential.customer_id)
+    
+    backup_path = None
+    if customer:
+        backup_base = os.getenv('BACKUP_PATH', './backups')
+        backup_path = os.path.join(backup_base, customer.code or "default")
+    
+    collector = MikroTikBackupCollector()
+    result = collector.backup_configuration(
+        host=credential.address or "",
+        username=credential.username or "admin",
+        password=credential.password or "",
+        port=credential.ssh_port or 22,
+        backup_path=backup_path,
+        backup_type=backup_type,
+    )
+    
+    return result
+
+
+# ==========================================
 # ROUTER OPERATIONS (via Agent Assignment)
 # ==========================================
 
