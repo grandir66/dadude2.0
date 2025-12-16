@@ -191,9 +191,21 @@ class VersionManager:
         """
         try:
             # Verifica che siamo in un repository git
-            if not (self.agent_dir / ".git").exists():
-                logger.warning("Not a git repository, cannot check for updates")
-                return None
+            git_dir = self.agent_dir / ".git"
+            logger.debug(f"Checking for updates in {self.agent_dir}, git exists: {git_dir.exists()}")
+            
+            if not git_dir.exists():
+                logger.warning(f"Not a git repository at {self.agent_dir}, cannot check for updates")
+                # Verifica se esiste in una posizione alternativa
+                alt_git_dir = self.agent_dir.parent / ".git"
+                if alt_git_dir.exists():
+                    logger.info(f"Found git repository at {alt_git_dir.parent}, trying alternative path")
+                    self.agent_dir = alt_git_dir.parent
+                else:
+                    return None
+            
+            # Verifica accesso alla rete
+            logger.debug("Fetching latest changes from origin/main...")
             
             # Fetch latest
             fetch_result = subprocess.run(
@@ -205,11 +217,17 @@ class VersionManager:
             )
             
             if fetch_result.returncode != 0:
-                logger.warning(f"Git fetch failed: {fetch_result.stderr}")
+                logger.warning(f"Git fetch failed (returncode={fetch_result.returncode}): {fetch_result.stderr}")
+                if fetch_result.stdout:
+                    logger.debug(f"Git fetch stdout: {fetch_result.stdout}")
                 return None
+            
+            logger.debug("Git fetch successful")
             
             # Verifica se ci sono commit nuovi
             current_commit = self.get_current_commit()
+            logger.debug(f"Current commit: {current_commit[:8] if current_commit else 'unknown'}")
+            
             result = subprocess.run(
                 ["git", "rev-parse", "origin/main"],
                 cwd=self.agent_dir,
@@ -219,13 +237,17 @@ class VersionManager:
             )
             
             if result.returncode != 0:
+                logger.warning(f"Failed to get origin/main commit: {result.stderr}")
                 return None
             
             latest_commit = result.stdout.strip()
+            logger.debug(f"Latest commit on origin/main: {latest_commit[:8]}")
             
             if current_commit != latest_commit:
-                logger.info(f"Update available: {current_commit[:8]} -> {latest_commit[:8]}")
+                logger.info(f"Update available: {current_commit[:8] if current_commit else 'unknown'} -> {latest_commit[:8]}")
                 return latest_commit
+            else:
+                logger.debug("No updates available, already at latest version")
             
             return None
             

@@ -6,6 +6,7 @@ import asyncio
 import os
 import signal
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from loguru import logger
@@ -29,7 +30,7 @@ except ImportError:
 
 
 # Version
-AGENT_VERSION = "2.3.8"
+AGENT_VERSION = "2.3.9"
 
 
 class DaDudeAgent:
@@ -238,17 +239,22 @@ class DaDudeAgent:
         Se l'update fallisce la connessione, esegue rollback automatico.
         """
         if not self._version_manager:
+            logger.debug("VersionManager not available, skipping update check")
             return
         
         try:
-            logger.info("Checking for updates on startup...")
+            agent_dir = os.getenv("AGENT_DIR", "/opt/dadude-agent")
+            logger.info(f"Checking for updates on startup (agent_dir={agent_dir})...")
             
             # Verifica se ci sono aggiornamenti disponibili
             new_commit = self._version_manager.check_for_updates()
             current_commit = self._version_manager.get_current_commit()
             
             if not new_commit:
-                logger.info("No updates available")
+                if current_commit:
+                    logger.info(f"No updates available (current: {current_commit[:8]})")
+                else:
+                    logger.info("No updates available (could not determine current version)")
                 return
             
             # Verifica se la nuova versione è marcata come bad
@@ -270,7 +276,16 @@ class DaDudeAgent:
                 self._version_manager.restore_backup(backup_path)
                 return
             
-            logger.info(f"Updated to {new_commit[:8]}, waiting for connection verification...")
+            logger.info(f"Updated to {new_commit[:8]}, code updated on disk")
+            logger.warning("IMPORTANT: Container restart required to load new code. Creating restart flag...")
+            
+            # Crea flag file per richiedere restart (gestito da watchdog esterno o manuale)
+            restart_flag = Path(agent_dir) / ".restart_required"
+            try:
+                restart_flag.write_text(f"Updated to {new_commit[:8]} at {datetime.now().isoformat()}\n")
+                logger.info(f"Restart flag created: {restart_flag}")
+            except Exception as e:
+                logger.warning(f"Could not create restart flag: {e}")
             
             # Avvia health check: se non ci connettiamo entro il timeout, rollback
             self._connection_verified = False

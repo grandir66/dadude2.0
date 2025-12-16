@@ -2,6 +2,7 @@
 DaDude - Agents Router
 API endpoints per registrazione e gestione dinamica degli agent
 """
+import asyncio
 from fastapi import APIRouter, HTTPException, Query, Header, Request
 from typing import Optional, List
 from pydantic import BaseModel
@@ -354,7 +355,7 @@ async def list_pending_agents():
 # ==========================================
 
 # Versione corrente del server
-SERVER_VERSION = "2.3.8"
+SERVER_VERSION = "2.3.9"
 GITHUB_REPO = "grandir66/dadude"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}"
 
@@ -726,7 +727,7 @@ async def update_agent_config(
 # ==========================================
 
 # Versione corrente dell'agent (da aggiornare ad ogni release)
-AGENT_VERSION = "2.3.8"
+AGENT_VERSION = "2.3.9"
 
 @router.get("/version")
 async def get_current_agent_version():
@@ -941,23 +942,80 @@ async def trigger_agent_update(agent_db_id: str):
         # Se abbiamo identificato l'host Proxmox, prova a eseguire lo script esterno
         if proxmox_host:
             # Prova a trovare il container ID cercando container con agent Docker
+            # IMPORTANTE: Trova il container corretto per questo agent specifico
+            # basandosi sull'IP dell'agent o sul nome.
+            # 
+            # FIX v2.2.4: Rimosso il problema del "break" che trovava sempre lo stesso container.
+            # Ora cerca il container corretto per ogni agent specifico verificando l'IP.
+            # Mantiene compatibilità con la configurazione precedente - lo script update-agent.sh
+            # riceve ancora il CTID come parametro, solo la ricerca è migliorata.
             try:
                 import subprocess
-                # Esegui lo script esterno via SSH sul server Proxmox
-                # Prima trova il container ID cercando container con agent Docker
-                find_ctid_cmd = f"ssh -o StrictHostKeyChecking=no root@{proxmox_host} 'pct list | grep running | awk \"{{print \\$1}}\" | while read ctid; do pct exec $ctid -- docker ps --filter name=dadude-agent --format \"{{{{.Names}}}}\" 2>/dev/null | grep -q dadude-agent && echo $ctid && break; done'"
+                # Strategia 1: Cerca il container che ha l'IP dell'agent come IP del container LXC
+                # Verifica l'IP effettivo del container invece della configurazione
+                find_ctid_by_ip_cmd = f"ssh -o StrictHostKeyChecking=no root@{proxmox_host} 'pct list | grep running | awk \"{{print \\$1}}\" | while read ctid; do pct exec $ctid -- ip addr show 2>/dev/null | grep -q \"{agent_ip}\" && echo $ctid && break; done'"
                 
                 find_result = subprocess.run(
-                    find_ctid_cmd,
+                    find_ctid_by_ip_cmd,
                     shell=True,
                     capture_output=True,
                     text=True,
-                    timeout=10,
+                    timeout=15,
                 )
                 
                 if find_result.returncode == 0 and find_result.stdout.strip():
                     container_id = find_result.stdout.strip()
-                    logger.info(f"Found container ID {container_id} for agent {agent.name} on {proxmox_host}")
+                    logger.info(f"Found container ID {container_id} for agent {agent.name} (matched by IP {agent_ip}) on {proxmox_host}")
+                else:
+                    # Strategia 2: Se non trovato per IP, cerca tutti i container con agent Docker
+                    # e verifica quale corrisponde all'agent tramite il nome o altre caratteristiche
+                    logger.info(f"Container not found by IP for {agent.name}, trying alternative method...")
+                    
+                    # Lista tutti i container con agent Docker e verifica quale corrisponde
+                    find_all_ctids_cmd = f"ssh -o StrictHostKeyChecking=no root@{proxmox_host} 'pct list | grep running | awk \"{{print \\$1}}\" | while read ctid; do pct exec $ctid -- docker ps --filter name=dadude-agent --format \"{{{{.Names}}}}\" 2>/dev/null | grep -q dadude-agent && echo $ctid; done'"
+                    
+                    find_all_result = subprocess.run(
+                        find_all_ctids_cmd,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    
+                    if find_all_result.returncode == 0 and find_all_result.stdout.strip():
+                        # Se c'è solo un container, usalo
+                        container_ids = [ctid.strip() for ctid in find_all_result.stdout.strip().split('\n') if ctid.strip()]
+                        if len(container_ids) == 1:
+                            container_id = container_ids[0]
+                            logger.info(f"Found single container ID {container_id} for agent {agent.name} on {proxmox_host}")
+                        else:
+                            # Se ci sono più container, cerca quello che corrisponde meglio
+                            # Verifica quale container ha un agent che corrisponde al nome o all'IP
+                            logger.warning(f"Multiple containers found ({len(container_ids)}), trying to match by agent name/IP...")
+                            
+                            # Per ogni container, verifica se l'agent corrisponde
+                            for ctid in container_ids:
+                                # Verifica se questo container ha l'IP corretto verificando l'IP effettivo
+                                check_ip_cmd = f"ssh -o StrictHostKeyChecking=no root@{proxmox_host} 'pct exec {ctid} -- ip addr show 2>/dev/null | grep -q \"{agent_ip}\"'"
+                                check_result = subprocess.run(
+                                    check_ip_cmd,
+                                    shell=True,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=10,
+                                )
+                                
+                                if check_result.returncode == 0:
+                                    container_id = ctid
+                                    logger.info(f"Matched container ID {container_id} for agent {agent.name} by IP verification ({agent_ip})")
+                                    break
+                            
+                            # Se ancora non trovato, usa il primo (fallback)
+                            if not container_id and container_ids:
+                                container_id = container_ids[0]
+                                logger.warning(f"Using first container ID {container_id} as fallback for agent {agent.name}")
+                
+                if container_id:
                     
                     # Esegui lo script di update esterno
                     update_script_path = "/opt/dadude-agent/dadude-agent/deploy/proxmox/update-agent.sh"
@@ -1268,30 +1326,67 @@ async def list_outdated_agents():
 async def update_all_agents():
     """
     Invia comando di aggiornamento a tutti gli agent outdated.
+    Aggiorna gli agent in sequenza per evitare conflitti.
     """
     outdated_result = await list_outdated_agents()
+    outdated_agents = outdated_result.get("outdated_agents", [])
+    
+    if not outdated_agents:
+        return {
+            "total_updated": 0,
+            "total_failed": 0,
+            "message": "No outdated agents found",
+            "results": [],
+        }
+    
+    logger.info(f"Starting update for {len(outdated_agents)} outdated agents")
     
     results = []
-    for agent in outdated_result.get("outdated_agents", []):
+    
+    for idx, agent in enumerate(outdated_agents, 1):
+        agent_id = agent["id"]
+        agent_name = agent.get("name", "Unknown")
+        logger.info(f"[{idx}/{len(outdated_agents)}] Updating agent {agent_name} (ID: {agent_id})")
+        
         try:
-            result = await trigger_agent_update(agent["id"])
+            result = await trigger_agent_update(agent_id)
+            success = result.get("success", False)
+            message = result.get("message") or result.get("error", "Unknown error")
+            
             results.append({
-                "agent_id": agent["id"],
-                "agent_name": agent["name"],
-                "success": result.get("success", False),
-                "message": result.get("message") or result.get("error"),
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+                "success": success,
+                "message": message,
             })
+            
+            if success:
+                logger.info(f"✓ Successfully updated agent {agent_name}")
+            else:
+                logger.warning(f"✗ Failed to update agent {agent_name}: {message}")
+                
         except Exception as e:
+            error_msg = str(e)
+            logger.error(f"✗ Exception updating agent {agent_name}: {error_msg}")
             results.append({
-                "agent_id": agent["id"],
-                "agent_name": agent["name"],
+                "agent_id": agent_id,
+                "agent_name": agent_name,
                 "success": False,
-                "message": str(e),
+                "message": error_msg,
             })
+        
+        # Piccolo delay tra gli update per evitare sovraccarichi
+        if idx < len(outdated_agents):
+            await asyncio.sleep(2)
+    
+    total_updated = sum(1 for r in results if r["success"])
+    total_failed = sum(1 for r in results if not r["success"])
+    
+    logger.info(f"Update completed: {total_updated} succeeded, {total_failed} failed")
     
     return {
-        "total_updated": sum(1 for r in results if r["success"]),
-        "total_failed": sum(1 for r in results if not r["success"]),
+        "total_updated": total_updated,
+        "total_failed": total_failed,
         "results": results,
     }
 
