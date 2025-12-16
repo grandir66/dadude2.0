@@ -915,7 +915,78 @@ async def trigger_agent_update(agent_db_id: str):
             break
     
     if ws_agent_id and ws_agent_id in hub._connections:
-        # Agent connesso via WebSocket - invia comando UPDATE_AGENT
+        # Agent connesso via WebSocket
+        # Prova prima a eseguire lo script esterno se possibile (più affidabile)
+        # Altrimenti invia comando UPDATE_AGENT via WebSocket
+        
+        # Identifica l'host Proxmox dall'indirizzo IP dell'agent
+        agent_ip = agent.address
+        proxmox_host = None
+        container_id = None
+        
+        # Mappa IP a host Proxmox (configurabile)
+        # Per ora, prova a identificare l'host dall'IP
+        if agent_ip:
+            # Se l'IP è nella rete 192.168.99.x, probabilmente è su 192.168.99.10
+            if agent_ip.startswith("192.168.99."):
+                proxmox_host = "192.168.99.10"
+            # Se l'IP è nella rete 192.168.40.x, probabilmente è su 192.168.40.3
+            elif agent_ip.startswith("192.168.40."):
+                proxmox_host = "192.168.40.3"
+            # Altrimenti, prova a trovare il container ID dall'IP o dal nome
+            else:
+                # Prova a identificare l'host dall'IP
+                proxmox_host = None
+        
+        # Se abbiamo identificato l'host Proxmox, prova a eseguire lo script esterno
+        if proxmox_host:
+            # Prova a trovare il container ID cercando container con agent Docker
+            try:
+                import subprocess
+                # Esegui lo script esterno via SSH sul server Proxmox
+                # Prima trova il container ID cercando container con agent Docker
+                find_ctid_cmd = f"ssh -o StrictHostKeyChecking=no root@{proxmox_host} 'pct list | grep running | awk \"{{print \\$1}}\" | while read ctid; do pct exec $ctid -- docker ps --filter name=dadude-agent --format \"{{{{.Names}}}}\" 2>/dev/null | grep -q dadude-agent && echo $ctid && break; done'"
+                
+                find_result = subprocess.run(
+                    find_ctid_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                
+                if find_result.returncode == 0 and find_result.stdout.strip():
+                    container_id = find_result.stdout.strip()
+                    logger.info(f"Found container ID {container_id} for agent {agent.name} on {proxmox_host}")
+                    
+                    # Esegui lo script di update esterno
+                    update_script_path = "/opt/dadude-agent/dadude-agent/deploy/proxmox/update-agent.sh"
+                    update_cmd = f"ssh -o StrictHostKeyChecking=no root@{proxmox_host} 'bash {update_script_path} {container_id}'"
+                    
+                    logger.info(f"Executing external update script for agent {agent.name}")
+                    update_result = subprocess.run(
+                        update_cmd,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=600,
+                    )
+                    
+                    if update_result.returncode == 0:
+                        return {
+                            "success": True,
+                            "message": "Update completed successfully via external script",
+                            "connection_type": "external_script",
+                            "output": update_result.stdout,
+                        }
+                    else:
+                        logger.warning(f"External script failed: {update_result.stderr}")
+                        # Fallback a WebSocket command
+            except Exception as e:
+                logger.warning(f"Could not execute external script: {e}")
+                # Fallback a WebSocket command
+        
+        # Fallback: invia comando UPDATE_AGENT via WebSocket
         logger.info(f"Triggering update for agent {agent.name} via WebSocket")
         try:
             result = await hub.send_command(
