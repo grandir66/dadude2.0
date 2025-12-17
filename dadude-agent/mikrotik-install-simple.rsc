@@ -69,8 +69,10 @@
 # ==========================================
 # 5b. Container tmpdir su USB (riduce errori di import/layer su storage interno)
 # ==========================================
-# Nota: usare direttamente `usb1` evita problemi se la directory non esiste
-/container/config/set tmpdir=usb1
+# Nota: RouterOS si aspetta una directory reale come tmpdir.
+# La creiamo su USB e la impostiamo come tmpdir.
+:do { /file/make-directory name="usb1/container-tmp" } on-error={}
+/container/config/set tmpdir=usb1/container-tmp
 
 # ==========================================
 # 6. Crea container dall'immagine tar con environment variables nel comando
@@ -84,11 +86,13 @@
 # Prova prima con immagine su USB
 # NOTA: Usiamo 'cd /app &&' nel comando invece di workdir perché RouterOS potrebbe non supportarlo
 :do {
+    :do { /file/make-directory name="usb1/dadude-agent" } on-error={}
     /container/add file=usb1/dadude-agent-mikrotik.tar interface=veth-dadude-agent root-dir=usb1/dadude-agent workdir=/ start-on-boot=yes logging=yes cmd=$cmdLine
     :put "Container creato con immagine su USB"
 } on-error={
     # Se fallisce, prova con immagine in root
     :do {
+        :do { /file/make-directory name="dadude-agent" } on-error={}
         /container/add file=/dadude-agent-mikrotik.tar interface=veth-dadude-agent root-dir=/dadude-agent workdir=/ start-on-boot=yes logging=yes cmd=$cmdLine
         :put "Container creato con immagine in root"
     } on-error={
