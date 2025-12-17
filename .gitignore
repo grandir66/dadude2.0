@@ -46,3 +46,4 @@ htmlcov/
 .pytest_cache/
 
 DA-inventory/
+dadude-agent/*.tar
