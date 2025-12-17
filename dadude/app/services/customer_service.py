@@ -1147,7 +1147,15 @@ class CustomerService:
         """Trova agent per ID univoco (usato per auto-registrazione)"""
         session = self._get_session()
         try:
-            # Prima cerca per ID database diretto
+            # 1. Cerca per dude_agent_id (campo dedicato per agent_id auto-registrati)
+            agent = session.query(AgentAssignmentDB).filter(
+                AgentAssignmentDB.dude_agent_id == agent_unique_id
+            ).first()
+            
+            if agent:
+                return self._to_agent_safe(agent)
+            
+            # 2. Cerca per ID database diretto
             agent = session.query(AgentAssignmentDB).filter(
                 AgentAssignmentDB.id == agent_unique_id
             ).first()
@@ -1155,7 +1163,7 @@ class CustomerService:
             if agent:
                 return self._to_agent_safe(agent)
             
-            # Poi cerca per nome esatto (agent_id)
+            # 3. Cerca per nome esatto (display name)
             agent = session.query(AgentAssignmentDB).filter(
                 AgentAssignmentDB.name == agent_unique_id
             ).first()
@@ -1163,7 +1171,7 @@ class CustomerService:
             if agent:
                 return self._to_agent_safe(agent)
             
-            # Cerca per nome base esatto (es: "agent-PX-OVH-51-1234" -> cerca "PX-OVH-51")
+            # 4. Cerca per nome base esatto (es: "agent-PX-OVH-51-1234" -> cerca "PX-OVH-51")
             # IMPORTANTE: match solo ESATTO, no match parziali che causano falsi positivi
             import re
             name_match = re.match(r'^agent-(.+?)(-\d+)?$', agent_unique_id)
@@ -1190,19 +1198,25 @@ class CustomerService:
         """Ottiene il token criptato dell'agent per autenticazione WebSocket"""
         session = self._get_session()
         try:
-            # Cerca per ID database diretto
+            # 1. Cerca per dude_agent_id (campo dedicato per agent_id auto-registrati)
             agent = session.query(AgentAssignmentDB).filter(
-                AgentAssignmentDB.id == agent_unique_id
+                AgentAssignmentDB.dude_agent_id == agent_unique_id
             ).first()
             
             if not agent:
-                # Cerca per nome esatto
+                # 2. Cerca per ID database diretto
+                agent = session.query(AgentAssignmentDB).filter(
+                    AgentAssignmentDB.id == agent_unique_id
+                ).first()
+            
+            if not agent:
+                # 3. Cerca per nome esatto
                 agent = session.query(AgentAssignmentDB).filter(
                     AgentAssignmentDB.name == agent_unique_id
                 ).first()
             
             if not agent:
-                # Cerca per pattern agent-name-timestamp
+                # 4. Cerca per pattern agent-name-timestamp
                 import re
                 name_match = re.match(r'^agent-(.+?)-\d+$', agent_unique_id)
                 if name_match:
@@ -1212,7 +1226,7 @@ class CustomerService:
                     ).first()
             
             if not agent:
-                # Cerca per nome parziale
+                # 5. Cerca per nome parziale (fallback)
                 all_agents = session.query(AgentAssignmentDB).filter(
                     AgentAssignmentDB.active == True
                 ).all()

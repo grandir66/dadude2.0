@@ -165,6 +165,7 @@ async def register_agent(
         agent = AgentAssignment(
             id=generate_uuid(),
             customer_id=None,  # Da assegnare manualmente
+            dude_agent_id=data.agent_id,  # Salva agent_id per lookup successivi
             name=data.agent_name,
             address=client_ip or "pending",
             port=8080,
