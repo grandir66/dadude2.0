@@ -42,6 +42,8 @@ services:
       - dadude_data:/app/data
       - dadude_logs:/app/logs
       - /var/run/docker.sock:/var/run/docker.sock  # Per auto-restart
+      # Monta il repository git per permettere auto-update (solo lettura per sicurezza)
+      - ${DADUDE_REPO_PATH:-./dadude}:/app/repo:ro
 
     networks:
       - dadude_network
