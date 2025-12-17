@@ -61,19 +61,12 @@ if [ -z "$AGENT_TOKEN" ]; then
     echo ""
 fi
 
-# Step 1: Build immagine Docker (linux/arm64 for RB5009)
-echo -e "${BLUE}[1/5] Building Docker image (linux/arm64)...${NC}"
+# Step 1+2: Build + Export (linux/arm64) as docker-archive tar (manifest.json)
+# NOTE: RouterOS sometimes fails importing tars produced by `docker save`.
+# `buildx --output type=docker,dest=...` produces a tar that RouterOS imports more reliably.
+echo -e "${BLUE}[1/5] Building+Exporting Docker image (linux/arm64) to docker-archive tar...${NC}"
 cd "$SCRIPT_DIR"
-docker buildx build --platform linux/arm64 -t $IMAGE_NAME --load . || {
-    echo -e "${RED}❌ Errore durante il build dell'immagine${NC}"
-    exit 1
-}
-echo -e "${GREEN}✅ Immagine buildata${NC}"
-echo ""
-
-# Step 2: Esporta immagine (docker-archive tar con manifest.json)
-echo -e "${BLUE}[2/5] Exporting image to docker-archive tar...${NC}"
-docker save $IMAGE_NAME -o "$IMAGE_FILE" || {
+docker buildx build --platform linux/arm64 -t $IMAGE_NAME --output "type=docker,dest=$IMAGE_FILE" . || {
     echo -e "${RED}❌ Errore durante l'export dell'immagine${NC}"
     exit 1
 }
