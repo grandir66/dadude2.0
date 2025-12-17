@@ -427,7 +427,7 @@ async def list_pending_agents():
 # ==========================================
 
 # Versione corrente del server
-SERVER_VERSION = "2.3.18"
+SERVER_VERSION = "2.3.19"
 GITHUB_REPO = "grandir66/dadude"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}"
 
@@ -492,11 +492,19 @@ async def check_server_update():
                 if match:
                     latest_version = match.group(1)
                     # Confronta con la versione su disco (non quella in memoria)
+                    # needs_update = True se GitHub ha una versione più nuova di quella su disco
                     needs_update = _compare_versions(current_version_disk, latest_version) < 0
                     
                     # Verifica anche se la versione su disco è diversa da quella in memoria
                     # (indica che serve un riavvio dopo git pull)
                     needs_restart = current_version_disk != SERVER_VERSION
+                    
+                    # Se serve riavvio ma non ci sono aggiornamenti su GitHub, 
+                    # mostra comunque che c'è qualcosa da fare (riavvio)
+                    if needs_restart and not needs_update:
+                        # La versione su disco è più nuova di quella in memoria
+                        # ma GitHub è aggiornato, quindi serve solo riavvio
+                        pass
                     
                     # Ottieni info ultimo commit
                     commits_resp = await client.get(
