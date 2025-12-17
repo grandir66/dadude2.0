@@ -84,12 +84,12 @@
 # Prova prima con immagine su USB
 # NOTA: Usiamo 'cd /app &&' nel comando invece di workdir perché RouterOS potrebbe non supportarlo
 :do {
-    /container/add file=usb1/dadude-agent-mikrotik.oci.tar interface=veth-dadude-agent root-dir=usb1/dadude-agent workdir=/ start-on-boot=yes logging=yes cmd=$cmdLine
+    /container/add file=usb1/dadude-agent-mikrotik.tar interface=veth-dadude-agent root-dir=usb1/dadude-agent workdir=/ start-on-boot=yes logging=yes cmd=$cmdLine
     :put "Container creato con immagine su USB"
 } on-error={
     # Se fallisce, prova con immagine in root
     :do {
-        /container/add file=/dadude-agent-mikrotik.oci.tar interface=veth-dadude-agent root-dir=/dadude-agent workdir=/ start-on-boot=yes logging=yes cmd=$cmdLine
+        /container/add file=/dadude-agent-mikrotik.tar interface=veth-dadude-agent root-dir=/dadude-agent workdir=/ start-on-boot=yes logging=yes cmd=$cmdLine
         :put "Container creato con immagine in root"
     } on-error={
         :put "ERRORE: Impossibile creare container!"
