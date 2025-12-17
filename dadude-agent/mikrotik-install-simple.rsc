@@ -80,17 +80,17 @@
 # NOTA: RouterOS potrebbe avere problemi con il comando diretto, usiamo sh -c
 # Questo dovrebbe risolvere il problema "chdir: No such file or directory"
 :local cmdLine ""
-:set cmdLine ("sh -c 'DADUDE_SERVER_URL=https://dadude.domarc.it:8000 DADUDE_AGENT_TOKEN=" . $agentToken . " DADUDE_AGENT_ID=" . $agentId . " DADUDE_AGENT_NAME=" . $agentName . " DADUDE_DNS_SERVERS=192.168.4.1,8.8.8.8 PYTHONUNBUFFERED=1 python -m app.agent'")
+:set cmdLine ("sh -c 'PYTHONPATH=/app DADUDE_SERVER_URL=https://dadude.domarc.it:8000 DADUDE_AGENT_TOKEN=" . $agentToken . " DADUDE_AGENT_ID=" . $agentId . " DADUDE_AGENT_NAME=" . $agentName . " DADUDE_DNS_SERVERS=192.168.4.1,8.8.8.8 PYTHONUNBUFFERED=1 python -m app.agent'")
 
 # Prova prima con immagine su USB
 # NOTA: Usiamo 'cd /app &&' nel comando invece di workdir perché RouterOS potrebbe non supportarlo
 :do {
-    /container/add file=usb1/dadude-agent-mikrotik.tar interface=veth-dadude-agent root-dir=usb1/dadude-agent start-on-boot=yes logging=yes cmd=$cmdLine
+    /container/add file=usb1/dadude-agent-mikrotik.oci.tar interface=veth-dadude-agent root-dir=usb1/dadude-agent start-on-boot=yes logging=yes cmd=$cmdLine
     :put "Container creato con immagine su USB"
 } on-error={
     # Se fallisce, prova con immagine in root
     :do {
-        /container/add file=/dadude-agent-mikrotik.tar interface=veth-dadude-agent root-dir=/dadude-agent start-on-boot=yes logging=yes cmd=$cmdLine
+        /container/add file=/dadude-agent-mikrotik.oci.tar interface=veth-dadude-agent root-dir=/dadude-agent start-on-boot=yes logging=yes cmd=$cmdLine
         :put "Container creato con immagine in root"
     } on-error={
         :put "ERRORE: Impossibile creare container!"

@@ -20,7 +20,8 @@ NC='\033[0m' # No Color
 # Configurazione
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="dadude-agent:mikrotik"
-IMAGE_FILE="dadude-agent-mikrotik.tar"
+# RouterOS container import is most reliable with an OCI archive built for linux/arm64
+IMAGE_FILE="dadude-agent-mikrotik.oci.tar"
 ROUTER_IP="${1:-}"
 AGENT_TOKEN="${2:-}"
 AGENT_ID="${3:-agent-rb5009-test}"
@@ -28,7 +29,7 @@ AGENT_NAME="${4:-RB5009 Test}"
 USB_DISK="usb1"
 SERVER_URL="https://dadude.domarc.it:8000"
 # URL GitHub Releases - usa /latest/ per l'ultima release
-IMAGE_URL="https://github.com/grandir66/Dadude/releases/latest/download/dadude-agent-mikrotik.tar"
+IMAGE_URL="https://github.com/grandir66/Dadude/releases/latest/download/dadude-agent-mikrotik.oci.tar"
 
 echo -e "${BLUE}=========================================="
 echo "DaDude Agent - Deploy su MikroTik RB5009"
@@ -60,10 +61,10 @@ if [ -z "$AGENT_TOKEN" ]; then
     echo ""
 fi
 
-# Step 1: Build immagine Docker
-echo -e "${BLUE}[1/5] Building Docker image...${NC}"
+# Step 1: Build immagine Docker (linux/arm64 for RB5009)
+echo -e "${BLUE}[1/5] Building Docker image (linux/arm64)...${NC}"
 cd "$SCRIPT_DIR"
-docker build -t $IMAGE_NAME . || {
+docker buildx build --platform linux/arm64 -t $IMAGE_NAME --load . || {
     echo -e "${RED}❌ Errore durante il build dell'immagine${NC}"
     exit 1
 }
@@ -71,9 +72,9 @@ echo -e "${GREEN}✅ Immagine buildata${NC}"
 echo ""
 
 # Step 2: Esporta immagine
-echo -e "${BLUE}[2/5] Exporting image to tar...${NC}"
-# RouterOS containers are far more reliable with an uncompressed `docker save` tar
-docker save $IMAGE_NAME -o "$IMAGE_FILE" || {
+echo -e "${BLUE}[2/5] Exporting image to OCI archive (.oci.tar)...${NC}"
+# RouterOS imports OCI archives more reliably than docker-archive tars
+docker buildx build --platform linux/arm64 --output "type=oci,dest=$IMAGE_FILE" . || {
     echo -e "${RED}❌ Errore durante l'export dell'immagine${NC}"
     exit 1
 }

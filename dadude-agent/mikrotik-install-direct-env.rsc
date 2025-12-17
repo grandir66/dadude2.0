@@ -19,7 +19,7 @@
 # Crea container con environment variables direttamente nel comando
 # NOTA: RouterOS potrebbe supportare env= direttamente invece di envlist
 :do {
-    /container/add file=usb1/dadude-agent-mikrotik.tar interface=veth-dadude-agent root-dir=usb1/dadude-agent start-on-boot=yes logging=yes cmd="python -m app.agent" env=DADUDE_SERVER_URL=https://dadude.domarc.it:8000 env=DADUDE_AGENT_TOKEN=mio-token-rb5009 env=DADUDE_AGENT_ID=agent-rb5009-test env=DADUDE_AGENT_NAME=RB5009\ Test env=DADUDE_DNS_SERVERS=192.168.4.1,8.8.8.8 env=PYTHONUNBUFFERED=1
+    /container/add file=usb1/dadude-agent-mikrotik.oci.tar interface=veth-dadude-agent root-dir=usb1/dadude-agent start-on-boot=yes logging=yes cmd="python -m app.agent" env=DADUDE_SERVER_URL=https://dadude.domarc.it:8000 env=DADUDE_AGENT_TOKEN=mio-token-rb5009 env=DADUDE_AGENT_ID=agent-rb5009-test env=DADUDE_AGENT_NAME=RB5009\ Test env=DADUDE_DNS_SERVERS=192.168.4.1,8.8.8.8 env=PYTHONUNBUFFERED=1
     :put "Container creato con env dirette"
 } on-error={
     :put "ERRORE: Impossibile creare container con env dirette"
