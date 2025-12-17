@@ -427,7 +427,7 @@ async def list_pending_agents():
 # ==========================================
 
 # Versione corrente del server
-SERVER_VERSION = "2.3.19"
+SERVER_VERSION = "2.3.20"
 GITHUB_REPO = "grandir66/dadude"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}"
 
@@ -685,22 +685,28 @@ async def trigger_server_update():
         output = result.stdout
         already_up_to_date = "Already up to date" in output or "Già aggiornato" in output
         
-        # 2. Se aggiornato, verifica se la versione è cambiata
+        # 2. Leggi sempre la versione dal file su disco dopo il pull (anche se già aggiornato)
+        # Questo permette di rilevare se il file è stato aggiornato manualmente
         new_version = None
         tag_created = False
         release_created = False
         
-        if not already_up_to_date:
+        try:
+            # Leggi versione dal file su disco dopo il pull
+            with open(version_file, 'r') as f:
+                content = f.read()
+                match = re.search(r'SERVER_VERSION\s*=\s*["\']([^"\']+)["\']', content)
+                if match:
+                    new_version = match.group(1)
+        except Exception as e:
+            logger.warning(f"Could not read new version after pull: {e}")
+        
+        # Se la versione su disco è diversa da quella in memoria, serve riavvio
+        needs_restart_after_update = new_version and new_version != SERVER_VERSION
+        
+        # 3. Se aggiornato e la versione è cambiata, crea tag e release
+        if not already_up_to_date and new_version and new_version != old_version:
             try:
-                # Leggi nuova versione dopo il pull
-                with open(version_file, 'r') as f:
-                    content = f.read()
-                    match = re.search(r'SERVER_VERSION\s*=\s*["\']([^"\']+)["\']', content)
-                    if match:
-                        new_version = match.group(1)
-                
-                # Se la versione è cambiata, crea tag e release
-                if new_version and new_version != old_version:
                     tag_name = f"v{new_version}"
                     
                     # Verifica se il tag esiste già
@@ -789,13 +795,26 @@ async def trigger_server_update():
             if release_created:
                 messages.append(f"Release v{new_version} creata su GitHub")
         
+        # Determina se serve riavvio
+        # Serve riavvio se: 
+        # 1. Ci sono stati aggiornamenti (non already_up_to_date), OPPURE
+        # 2. La versione su disco è diversa da quella in memoria (serve riavvio per applicare)
+        needs_restart = not already_up_to_date or needs_restart_after_update
+        
+        # Se serve riavvio per versione diversa, aggiungi al messaggio
+        if needs_restart_after_update and already_up_to_date:
+            messages.append(f"Versione su disco: v{new_version} (serve riavvio per applicare)")
+        
         return {
             "success": True,
             "already_up_to_date": already_up_to_date,
             "message": " | ".join(messages),
             "output": output,
-            "needs_restart": not already_up_to_date,
+            "needs_restart": needs_restart,
             "version_changed": new_version != old_version if new_version and old_version else False,
+            "version_disk_different": needs_restart_after_update,
+            "current_version_memory": SERVER_VERSION,
+            "current_version_disk": new_version,
             "new_version": new_version,
             "tag_created": tag_created,
             "release_created": release_created,

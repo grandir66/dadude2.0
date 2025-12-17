@@ -1297,11 +1297,36 @@ async function updateServer() {
         const data = await response.json();
         
         if (data.success) {
+            let message = '';
+            
             if (data.already_up_to_date) {
-                alert('✅ Server già aggiornato');
+                if (data.version_disk_different) {
+                    // Repository aggiornato ma serve riavvio
+                    message = `⚠️ Riavvio necessario!\n\n`;
+                    message += `Versione in memoria: v${data.current_version_memory}\n`;
+                    message += `Versione su disco: v${data.current_version_disk}\n\n`;
+                    message += `Il repository è aggiornato ma il server deve essere riavviato per applicare le modifiche.`;
+                    
+                    if (confirm(message + '\n\nVuoi riavviare il server ora?')) {
+                        await restartServer();
+                    }
+                } else {
+                    alert('✅ Server già aggiornato');
+                }
             } else {
-                alert(`✅ Server aggiornato!\n\n${data.output}\n\n` +
-                      (data.needs_restart ? '⚠️ Riavvio necessario per applicare le modifiche.' : ''));
+                message = `✅ Server aggiornato!\n\n${data.output}\n\n`;
+                if (data.version_changed && data.new_version) {
+                    message += `Nuova versione: v${data.new_version}\n`;
+                }
+                if (data.tag_created) {
+                    message += `✅ Tag v${data.new_version} creato\n`;
+                }
+                if (data.release_created) {
+                    message += `✅ Release v${data.new_version} creata su GitHub\n`;
+                }
+                message += data.needs_restart ? '\n⚠️ Riavvio necessario per applicare le modifiche.' : '';
+                
+                alert(message);
                 
                 if (data.needs_restart) {
                     if (confirm('Vuoi riavviare il server ora?')) {
@@ -1310,7 +1335,7 @@ async function updateServer() {
                 }
             }
         } else {
-            alert('❌ Aggiornamento fallito:\n\n' + data.error);
+            alert('❌ Aggiornamento fallito:\n\n' + data.error + (data.suggestion ? '\n\nSuggerimento: ' + data.suggestion : ''));
         }
         
         loadServerVersion();
