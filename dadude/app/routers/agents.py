@@ -613,45 +613,26 @@ async def trigger_server_update():
             except:
                 pass
         
-        # 1. Git pull - gestisce permessi per repository montato in Docker
-        if os.path.exists("/.dockerenv") and os.path.exists("/app/repo"):
-            # In Docker con repository montato: esegui git pull dall'host tramite API
-            # Il repository è montato dall'host, quindi dobbiamo eseguire git pull dall'host
-            # Per ora, restituisci un messaggio che indica di eseguire manualmente
-            # oppure modifica i permessi del repository montato
-            try:
-                # Prova prima come utente corrente
-                result = subprocess.run(
-                    ["git", "pull", "--rebase"],
-                    cwd=project_dir,
-                    capture_output=True,
-                    text=True,
-                    timeout=60
-                )
-                
-                # Se fallisce per permessi, suggerisci soluzione
-                if result.returncode != 0 and "Permission denied" in result.stderr:
-                    return {
-                        "success": False,
-                        "error": "Permessi insufficienti sul repository montato. Esegui manualmente: docker exec -u root dadude bash -c 'cd /app/repo/dadude && git pull origin main'",
-                        "output": result.stdout,
-                        "suggestion": "Esegui git pull dall'host o modifica i permessi del repository montato"
-                    }
-            except Exception as e:
+        # 1. Git pull
+        # In Docker con repository montato, i permessi dovrebbero essere già configurati
+        result = subprocess.run(
+            ["git", "pull", "--rebase"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        # Se fallisce per permessi, fornisci istruzioni chiare
+        if result.returncode != 0 and "Permission denied" in result.stderr:
+            if os.path.exists("/.dockerenv"):
                 return {
                     "success": False,
-                    "error": f"Errore durante git pull: {str(e)}",
-                    "suggestion": "Esegui git pull manualmente dall'host"
+                    "error": "Permessi insufficienti sul repository montato",
+                    "output": result.stdout,
+                    "stderr": result.stderr,
+                    "suggestion": "Esegui dall'host: docker exec -u root dadude bash -c 'cd /app/repo/dadude && git pull origin main'"
                 }
-        else:
-            # Ambiente normale (non Docker o repository locale)
-            result = subprocess.run(
-                ["git", "pull", "--rebase"],
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
         
         if result.returncode != 0:
             return {
