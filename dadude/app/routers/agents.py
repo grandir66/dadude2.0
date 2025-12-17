@@ -577,7 +577,11 @@ async def trigger_server_update():
     from ..config import get_settings
     
     # Determina la directory del progetto
-    project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # Se siamo in Docker e il repo è montato, usa quello, altrimenti cerca nella struttura normale
+    if os.path.exists("/app/repo"):
+        project_dir = "/app/repo/dadude"  # Repository montato in Docker
+    else:
+        project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
     # Leggi versione corrente prima del pull
     version_file = os.path.join(project_dir, "app", "routers", "agents.py")
