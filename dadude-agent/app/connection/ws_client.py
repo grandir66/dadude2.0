@@ -267,8 +267,8 @@ class AgentWebSocketClient:
             elif base_url.startswith("https://"):
                 base_url = "wss://" + base_url[8:]
             elif not base_url.startswith("ws://") and not base_url.startswith("wss://"):
-                # Default: usa wss:// per connessioni sicure
-                base_url = "wss://" + base_url
+                # Default: usa ws:// (http) - per wss usare https:// nell'URL
+                base_url = "ws://" + base_url
             
             ws_url = f"{base_url}/api/v1/agents/ws/{self.agent_id}"
             
