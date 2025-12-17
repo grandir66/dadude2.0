@@ -62,9 +62,9 @@
 /ip/address/add address=172.17.0.1/24 interface=bridge-dadude-agent
 
 # ==========================================
-# 5. Configura NAT per accesso internet
+# 5. Configura NAT per accesso internet (senza out-interface!)
 # ==========================================
-/ip/firewall/nat/add chain=srcnat action=masquerade src-address=172.17.0.0/24 out-interface=bridge-dadude-agent comment="dadude-agent-nat"
+/ip/firewall/nat/add chain=srcnat action=masquerade src-address=172.17.0.0/24 comment="dadude-agent-nat"
 
 # ==========================================
 # 5b. Container tmpdir su USB (riduce errori di import/layer su storage interno)
