@@ -390,12 +390,13 @@ async def list_pending_agents():
     
     try:
         # Mostra agent che:
-        # - Non hanno customer_id (mai assegnati)
+        # - Non hanno customer_id (mai assegnati) - include NULL e stringa vuota
         # - O hanno status pending_approval
         # - O non sono attivi (active=False)
         agents = session.query(AgentAssignment).filter(
             or_(
                 AgentAssignment.customer_id == None,
+                AgentAssignment.customer_id == "",
                 AgentAssignment.status == "pending_approval",
                 AgentAssignment.active == False
             )
