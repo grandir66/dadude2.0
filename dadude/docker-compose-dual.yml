@@ -28,6 +28,10 @@ services:
       - DADUDE_AGENT_PORT=8000
       - DADUDE_ADMIN_PORT=8001
       
+      # Auto-approvazione agent: imposta l'ID cliente di default
+      # Se impostato, i nuovi agent vengono approvati automaticamente
+      - DADUDE_DEFAULT_CUSTOMER_ID=${DADUDE_DEFAULT_CUSTOMER_ID:-}
+      
       # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
 

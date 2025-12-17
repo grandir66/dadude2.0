@@ -143,10 +143,11 @@ async def register_agent(
     except Exception as e:
         logger.debug(f"Agent not found, will create: {e}")
     
-    # Crea nuovo agent (senza customer_id - deve essere approvato)
+    # Crea nuovo agent
     try:
         from ..models.database import AgentAssignment, generate_uuid, init_db, get_session
         from ..config import get_settings
+        import os
         
         settings = get_settings()
         db_url = settings.database_url.replace("+aiosqlite", "")
@@ -162,9 +163,13 @@ async def register_agent(
             agent_token = secrets.token_urlsafe(32)
             logger.info(f"Generated new token for agent {data.agent_id}")
         
+        # Auto-approvazione: se DADUDE_DEFAULT_CUSTOMER_ID è impostato, approva automaticamente
+        default_customer_id = os.getenv("DADUDE_DEFAULT_CUSTOMER_ID", None)
+        auto_approve = default_customer_id is not None
+        
         agent = AgentAssignment(
             id=generate_uuid(),
-            customer_id=None,  # Da assegnare manualmente
+            customer_id=default_customer_id,  # Auto-assegna se configurato
             dude_agent_id=data.agent_id,  # Salva agent_id per lookup successivi
             name=data.agent_name,
             address=client_ip or "pending",
@@ -173,9 +178,9 @@ async def register_agent(
             agent_api_port=8080,
             agent_token=encryption.encrypt(agent_token),
             agent_url=f"http://{client_ip}:8080" if client_ip else None,
-            status="pending_approval",
+            status="online" if auto_approve else "pending_approval",
             version=data.version,
-            active=False,  # Inattivo finché non approvato
+            active=auto_approve,  # Attivo se auto-approvato
         )
         
         # Salva capabilities come JSON
@@ -186,20 +191,32 @@ async def register_agent(
         session.add(agent)
         session.commit()
         
-        logger.success(f"New agent registered: {data.agent_id} ({data.agent_name}) from {client_ip}")
-        
-        return {
-            "success": True,
-            "registered": True,
-            "agent_db_id": agent.id,
-            "agent_token": agent_token,  # Invia token solo alla prima registrazione
-            "message": "Agent registered successfully. Awaiting admin approval.",
-            "next_steps": [
-                "Save the agent_token securely",
-                "An admin will approve and assign this agent to a customer",
-                "Once approved, the agent will receive its configuration"
-            ]
-        }
+        if auto_approve:
+            logger.success(f"New agent auto-approved: {data.agent_id} ({data.agent_name}) -> customer {default_customer_id}")
+            return {
+                "success": True,
+                "registered": True,
+                "approved": True,
+                "agent_db_id": agent.id,
+                "agent_token": agent_token,
+                "customer_id": default_customer_id,
+                "message": "Agent registered and auto-approved.",
+            }
+        else:
+            logger.success(f"New agent registered: {data.agent_id} ({data.agent_name}) from {client_ip}")
+            return {
+                "success": True,
+                "registered": True,
+                "approved": False,
+                "agent_db_id": agent.id,
+                "agent_token": agent_token,
+                "message": "Agent registered successfully. Awaiting admin approval.",
+                "next_steps": [
+                    "Save the agent_token securely",
+                    "An admin will approve and assign this agent to a customer",
+                    "Once approved, the agent will receive its configuration"
+                ]
+            }
         
     except Exception as e:
         logger.error(f"Failed to register agent: {e}")
