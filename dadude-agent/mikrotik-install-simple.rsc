@@ -67,6 +67,11 @@
 /ip/firewall/nat/add chain=srcnat action=masquerade src-address=172.17.0.0/24 out-interface=bridge-dadude-agent comment="dadude-agent-nat"
 
 # ==========================================
+# 5b. Container tmpdir su USB (riduce errori di import/layer su storage interno)
+# ==========================================
+/container/config/set tmpdir=usb1/container-tmp
+
+# ==========================================
 # 6. Crea container dall'immagine tar con environment variables nel comando
 # NOTA: RouterOS non supporta /container/envs/add, quindi passiamo le env direttamente nel cmd
 # MODIFICA: Cambia il percorso se l'immagine è in una posizione diversa
