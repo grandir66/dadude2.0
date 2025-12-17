@@ -596,6 +596,14 @@ async def trigger_server_update():
         logger.warning(f"Could not read current version: {e}")
     
     try:
+        # Configura git safe.directory se necessario (per Docker con repository montato)
+        if os.path.exists("/app/repo"):
+            subprocess.run(
+                ["git", "config", "--global", "--add", "safe.directory", "/app/repo"],
+                capture_output=True,
+                timeout=5
+            )
+        
         # 1. Git pull
         result = subprocess.run(
             ["git", "pull", "--rebase"],
