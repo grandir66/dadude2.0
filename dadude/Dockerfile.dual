@@ -16,10 +16,11 @@ ENV TZ=Europe/Rome
 # Working directory
 WORKDIR /app
 
-# Install system dependencies (curl for healthcheck, docker-cli for restart)
+# Install system dependencies (curl for healthcheck, docker-cli for restart, git for auto-update)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     openssl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Docker CLI for self-restart capability
