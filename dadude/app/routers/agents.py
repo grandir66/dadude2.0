@@ -116,10 +116,11 @@ async def register_agent(
     
     # Verifica se agent già esiste (per ID, nome o indirizzo)
     try:
+        logger.debug(f"Looking up existing agent: agent_id={data.agent_id}, address={client_ip}")
         existing = service.get_agent_by_unique_id(data.agent_id, address=client_ip)
         if existing:
             # Aggiorna info esistente
-            logger.info(f"Agent {data.agent_id} already registered, updating info")
+            logger.info(f"Agent {data.agent_id} already registered (DB ID: {existing.id}), updating info")
             
             # Aggiorna IP e status
             service.update_agent_status(
@@ -140,8 +141,51 @@ async def register_agent(
                 "agent_db_id": existing.id,
                 "message": "Agent info updated"
             }
+        else:
+            logger.info(f"Agent {data.agent_id} not found in database, will create new record")
+            
+            # Fix: cerca anche per nome e aggiorna dude_agent_id se mancante
+            try:
+                from ..models.database import AgentAssignmentDB, init_db, get_session
+                from ..config import get_settings
+                settings = get_settings()
+                db_url = settings.database_url.replace("+aiosqlite", "")
+                engine = init_db(db_url)
+                fix_session = get_session(engine)
+                
+                # Cerca agent con stesso nome ma senza dude_agent_id
+                fix_agent = fix_session.query(AgentAssignmentDB).filter(
+                    AgentAssignmentDB.name == data.agent_name,
+                    (AgentAssignmentDB.dude_agent_id == None) | (AgentAssignmentDB.dude_agent_id == "")
+                ).first()
+                
+                if fix_agent:
+                    logger.info(f"Found existing agent {fix_agent.id} with name '{data.agent_name}' but missing dude_agent_id, updating...")
+                    fix_agent.dude_agent_id = data.agent_id
+                    fix_session.commit()
+                    fix_session.close()
+                    
+                    # Ricarica usando il servizio
+                    existing = service.get_agent_by_unique_id(data.agent_id, address=client_ip)
+                    if existing:
+                        logger.info(f"Agent {data.agent_id} found after fix, updating info")
+                        service.update_agent_status(existing.id, status="online", version=data.version)
+                        if client_ip and client_ip != existing.address:
+                            service.update_agent_address(existing.id, client_ip)
+                        return {
+                            "success": True,
+                            "registered": False,
+                            "updated": True,
+                            "agent_db_id": existing.id,
+                            "message": "Agent info updated (fixed missing dude_agent_id)"
+                        }
+                else:
+                    fix_session.close()
+            except Exception as fix_error:
+                logger.debug(f"Fix attempt failed: {fix_error}")
+                
     except Exception as e:
-        logger.debug(f"Agent not found, will create: {e}")
+        logger.warning(f"Error looking up agent {data.agent_id}: {e}, will create new record")
     
     # Crea nuovo agent
     try:

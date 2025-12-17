@@ -1145,6 +1145,7 @@ class CustomerService:
     
     def get_agent_by_unique_id(self, agent_unique_id: str, address: str = None) -> Optional[AgentAssignmentSafe]:
         """Trova agent per ID univoco (usato per auto-registrazione)"""
+        from loguru import logger
         session = self._get_session()
         try:
             # 1. Cerca per dude_agent_id (campo dedicato per agent_id auto-registrati)
@@ -1153,7 +1154,10 @@ class CustomerService:
             ).first()
             
             if agent:
+                logger.debug(f"Found agent by dude_agent_id: {agent_unique_id} -> DB ID {agent.id}")
                 return self._to_agent_safe(agent)
+            
+            logger.debug(f"No agent found with dude_agent_id={agent_unique_id}, trying other methods...")
             
             # 2. Cerca per ID database diretto
             agent = session.query(AgentAssignmentDB).filter(
