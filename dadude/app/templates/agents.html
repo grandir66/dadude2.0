@@ -1180,12 +1180,50 @@ async function verifyAgentVersion(agentId, agentName) {
 
 async function loadServerVersion() {
     try {
-        const response = await fetch('/api/v1/agents/server/version');
-        const data = await response.json();
+        // Carica versione corrente
+        const versionResponse = await fetch('/api/v1/agents/server/version');
+        const versionData = await versionResponse.json();
+        document.getElementById('server-version').textContent = `v${versionData.version}`;
         
-        document.getElementById('server-version').textContent = `v${data.version}`;
-        document.getElementById('agent-version').textContent = `v${data.agent_version}`;
+        // Controlla aggiornamenti
+        const updateResponse = await fetch('/api/v1/agents/server/check-update');
+        const updateData = await updateResponse.json();
+        
+        if (updateData.success) {
+            // Mostra versione corrente (da disco se disponibile, altrimenti da memoria)
+            const currentVersion = updateData.current_version_disk || updateData.current_version;
+            document.getElementById('server-version').textContent = `v${currentVersion}`;
+            
+            // Se la versione su disco è diversa da quella in memoria, indica che serve riavvio
+            if (updateData.needs_restart) {
+                document.getElementById('server-version').innerHTML = `v${currentVersion} <span class="badge bg-warning">Riavvio necessario</span>`;
+            }
+            
+            if (updateData.needs_update) {
+                document.getElementById('update-status-container').style.display = 'flex';
+                document.getElementById('up-to-date-container').style.display = 'none';
+                document.getElementById('latest-version').textContent = `v${updateData.latest_version}`;
+            } else {
+                document.getElementById('update-status-container').style.display = 'none';
+                document.getElementById('up-to-date-container').style.display = 'flex';
+                
+                // Se serve riavvio, mostra avviso
+                if (updateData.needs_restart) {
+                    document.getElementById('up-to-date-container').innerHTML = `
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-exclamation-triangle-fill fs-2 me-3 text-warning"></i>
+                            <div>
+                                <small class="text-muted">Stato</small>
+                                <h5 class="mb-0 text-warning">Riavvio necessario</h5>
+                                <small class="text-muted">Versione su disco: v${updateData.current_version_disk}</small>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+        }
     } catch (e) {
+        console.error('Error loading server version:', e);
         document.getElementById('server-version').textContent = 'Errore';
     }
 }
@@ -1202,22 +1240,43 @@ async function checkServerUpdate() {
         const data = await response.json();
         
         if (data.success) {
+            const currentVersion = data.current_version_disk || data.current_version;
+            
             if (data.needs_update) {
                 container.style.display = 'flex';
                 document.getElementById('latest-version').textContent = `v${data.latest_version}`;
                 
-                if (data.release_name) {
-                    alert(`🆕 Aggiornamento disponibile!\n\n` +
-                          `Versione attuale: v${data.current_version}\n` +
-                          `Nuova versione: v${data.latest_version}\n` +
-                          `Nome: ${data.release_name}\n` +
-                          `Data: ${data.release_date ? new Date(data.release_date).toLocaleDateString('it-IT') : 'N/A'}\n\n` +
-                          `Note:\n${data.changelog || 'Nessuna nota'}`);
+                let message = `🆕 Aggiornamento disponibile!\n\n`;
+                message += `Versione attuale: v${currentVersion}\n`;
+                if (data.needs_restart) {
+                    message += `⚠️ Versione su disco: v${data.current_version_disk} (serve riavvio)\n`;
                 }
+                message += `Nuova versione: v${data.latest_version}\n`;
+                if (data.release_name) {
+                    message += `Nome: ${data.release_name}\n`;
+                }
+                if (data.release_date) {
+                    message += `Data: ${new Date(data.release_date).toLocaleDateString('it-IT')}\n`;
+                }
+                if (data.changelog) {
+                    message += `\nNote:\n${data.changelog}`;
+                }
+                alert(message);
             } else {
                 upToDateContainer.style.display = 'flex';
-                alert(`✅ Server aggiornato\n\nVersione: v${data.current_version}`);
+                
+                if (data.needs_restart) {
+                    alert(`⚠️ Riavvio necessario!\n\n` +
+                          `Versione in memoria: v${data.current_version}\n` +
+                          `Versione su disco: v${data.current_version_disk}\n\n` +
+                          `Esegui git pull e riavvia il server per applicare le modifiche.`);
+                } else {
+                    alert(`✅ Server aggiornato\n\nVersione: v${currentVersion}`);
+                }
             }
+            
+            // Ricarica la versione per aggiornare l'interfaccia
+            loadServerVersion();
         } else {
             alert('⚠️ Impossibile verificare aggiornamenti: ' + data.error);
         }
