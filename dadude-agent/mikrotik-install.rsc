@@ -74,9 +74,10 @@
 /container/config/set tmpdir=USB_DISK_QUI/container-tmp registry-url=https://ghcr.io
 
 # Costruisci comando container con agent_id e token generati
-:local cmdBase "sh -c 'PYTHONPATH=/app DADUDE_SERVER_URL=https://dadude.domarc.it:8000 DADUDE_AGENT_TOKEN="
-:local cmdMiddle " DADUDE_AGENT_ID="
-:local cmdEnd " python -m app.agent'"
+# IMPORTANTE: usa export per assicurarsi che le variabili siano disponibili
+:local cmdBase "sh -c 'export PYTHONPATH=/app && export DADUDE_SERVER_URL=https://dadude.domarc.it:8000 && export DADUDE_AGENT_TOKEN="
+:local cmdMiddle " && export DADUDE_AGENT_ID="
+:local cmdEnd " && python -m app.agent'"
 :local containerCmd ($cmdBase . $agentToken . $cmdMiddle . $agentId . $cmdEnd)
 
 # Crea container
