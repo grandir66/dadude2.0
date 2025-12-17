@@ -427,7 +427,7 @@ async def list_pending_agents():
 # ==========================================
 
 # Versione corrente del server
-SERVER_VERSION = "2.3.17"
+SERVER_VERSION = "2.3.18"
 GITHUB_REPO = "grandir66/dadude"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}"
 
@@ -448,12 +448,36 @@ async def get_server_version():
 async def check_server_update():
     """
     Controlla se è disponibile una nuova versione del server su GitHub.
-    Legge direttamente la versione dal file agents.py su GitHub.
+    Legge la versione corrente dal file su disco (non dalla memoria) per rilevare aggiornamenti dopo git pull.
     """
     import re
     
     try:
         import httpx
+        
+        # Leggi versione corrente dal file su disco (non dalla variabile in memoria)
+        # Questo permette di rilevare aggiornamenti anche dopo git pull senza riavvio
+        current_version_disk = SERVER_VERSION
+        version_file_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "app", "routers", "agents.py"
+        )
+        
+        # Se siamo in Docker con repository montato, usa il percorso montato
+        if os.path.exists("/app/repo"):
+            if os.path.exists("/app/repo/dadude/app/routers/agents.py"):
+                version_file_path = "/app/repo/dadude/app/routers/agents.py"
+            elif os.path.exists("/app/repo/app/routers/agents.py"):
+                version_file_path = "/app/repo/app/routers/agents.py"
+        
+        try:
+            with open(version_file_path, 'r') as f:
+                file_content = f.read()
+                match = re.search(r'SERVER_VERSION\s*=\s*["\']([^"\']+)["\']', file_content)
+                if match:
+                    current_version_disk = match.group(1)
+        except Exception as e:
+            logger.warning(f"Could not read version from disk, using in-memory version: {e}")
         
         async with httpx.AsyncClient(timeout=15) as client:
             # Leggi versione dal file raw su GitHub
@@ -467,7 +491,12 @@ async def check_server_update():
                 match = re.search(r'SERVER_VERSION\s*=\s*["\']([^"\']+)["\']', content)
                 if match:
                     latest_version = match.group(1)
-                    needs_update = _compare_versions(SERVER_VERSION, latest_version) < 0
+                    # Confronta con la versione su disco (non quella in memoria)
+                    needs_update = _compare_versions(current_version_disk, latest_version) < 0
+                    
+                    # Verifica anche se la versione su disco è diversa da quella in memoria
+                    # (indica che serve un riavvio dopo git pull)
+                    needs_restart = current_version_disk != SERVER_VERSION
                     
                     # Ottieni info ultimo commit
                     commits_resp = await client.get(
@@ -489,9 +518,11 @@ async def check_server_update():
                     
                     return {
                         "success": True,
-                        "current_version": SERVER_VERSION,
+                        "current_version": SERVER_VERSION,  # Versione in memoria (runtime)
+                        "current_version_disk": current_version_disk,  # Versione su disco
                         "latest_version": latest_version,
                         "needs_update": needs_update,
+                        "needs_restart": needs_restart,  # Indica se serve riavvio dopo git pull
                         "release_name": f"v{latest_version}" if needs_update else "Current",
                         "release_date": release_date,
                         "release_url": f"https://github.com/{GITHUB_REPO}/commits/main",
@@ -502,12 +533,14 @@ async def check_server_update():
                     return {
                         "success": False,
                         "current_version": SERVER_VERSION,
+                        "current_version_disk": current_version_disk,
                         "error": "Could not parse version from GitHub",
                     }
             else:
                 return {
                     "success": False,
                     "current_version": SERVER_VERSION,
+                    "current_version_disk": current_version_disk,
                     "error": f"GitHub raw file error: {response.status_code}",
                 }
                 
