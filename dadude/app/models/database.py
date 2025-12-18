@@ -479,15 +479,34 @@ class DiscoveredDevice(Base):
     )
 
 
-# Database setup
-def init_db(database_url: str = "sqlite:///./data/dadude.db"):
-    """Inizializza database e crea tabelle"""
-    engine = create_engine(database_url, echo=False)
+# Database setup (legacy sync mode - for backward compatibility)
+def init_db(database_url: str = None):
+    """
+    Inizializza database e crea tabelle (legacy sync mode).
+    For v2.0, use database_v2.py functions instead.
+    """
+    if database_url is None:
+        from ..config import get_settings
+        settings = get_settings()
+        database_url = settings.database_url_sync_computed
+
+    engine = create_engine(database_url, echo=False, pool_pre_ping=True)
     Base.metadata.create_all(engine)
     return engine
 
 
 def get_session(engine):
-    """Crea sessione database"""
+    """Crea sessione database (legacy sync mode)"""
     Session = sessionmaker(bind=engine)
     return Session()
+
+
+# Type alias for JSON columns (uses JSONB on PostgreSQL for better performance)
+def get_json_type():
+    """Get appropriate JSON type for current database"""
+    from ..config import get_settings
+    settings = get_settings()
+    if settings.is_postgres:
+        from sqlalchemy.dialects.postgresql import JSONB
+        return JSONB
+    return JSON
