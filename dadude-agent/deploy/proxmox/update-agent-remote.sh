@@ -138,25 +138,33 @@ fi
 
 # Se ancora non trovato, usa il gateway come DNS (comune per container DHCP)
 if [ \"\$DNS_FOUND\" = false ] && [ -n \"\$GATEWAY\" ]; then
-    echo \"   WARNING: DNS non trovato, uso gateway come DNS: \$GATEWAY\"
+    echo \"   WARNING: DNS non trovato, configurazione gateway come DNS: \$GATEWAY\"
     DNS_SERVERS=\"\$GATEWAY\"
-    # Aggiungi temporaneamente in /etc/resolv.conf se non presente
-    if ! pct exec $CONTAINER_ID -- grep -q \"\$GATEWAY\" /etc/resolv.conf 2>/dev/null; then
-        pct exec $CONTAINER_ID -- bash -c \"echo 'nameserver \$GATEWAY' >> /etc/resolv.conf\" 2>/dev/null || true
-    fi
+    # Crea/aggiorna /etc/resolv.conf con gateway come DNS
+    pct exec $CONTAINER_ID -- bash -c \"cat > /etc/resolv.conf << EOF
+nameserver \$GATEWAY
+nameserver 8.8.8.8
+EOF
+\" 2>/dev/null || true
+    echo \"   Configurato /etc/resolv.conf con gateway e 8.8.8.8\"
+    DNS_FOUND=true
 fi
 
 # Verifica risoluzione DNS
 if [ -n \"\$DNS_SERVERS\" ]; then
-    echo \"   DNS server: \$DNS_SERVERS\"
-    if pct exec $CONTAINER_ID -- nslookup github.com >/dev/null 2>&1; then
+    echo \"   DNS server configurato: \$DNS_SERVERS\"
+    # Attendi un momento per permettere al DNS di essere disponibile
+    sleep 1
+    
+    # Prova risoluzione DNS
+    if pct exec $CONTAINER_ID -- nslookup github.com >/dev/null 2>&1 || pct exec $CONTAINER_ID -- getent hosts github.com >/dev/null 2>&1; then
         echo \"   Risoluzione DNS: OK\"
     else
         echo \"   WARNING: DNS configurato ma risoluzione non funziona\"
-        echo \"   Tentativo con IP diretto di GitHub...\"
+        echo \"   Uso IP diretto di GitHub come fallback...\"
         # Verifica se già presente in /etc/hosts
         if ! pct exec $CONTAINER_ID -- grep -q \"github.com\" /etc/hosts 2>/dev/null; then
-            # Aggiungi IP diretto di GitHub (usa IP più recente)
+            # Aggiungi IP diretto di GitHub (usa IP più recente e affidabile)
             pct exec $CONTAINER_ID -- bash -c \"echo '140.82.121.4 github.com' >> /etc/hosts\" 2>/dev/null || true
             echo \"   Aggiunto IP diretto di GitHub in /etc/hosts\"
         fi
