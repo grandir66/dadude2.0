@@ -698,42 +698,49 @@ class CommandHandler:
     
     async def _update_agent_internal(self, params: Dict) -> CommandResult:
         """
-        Metodo interno di update (fallback se script esterno non disponibile).
-        Migliorato con gestione errori più robusta.
+        Metodo interno di update con stessa logica dello script remoto.
+        Preserva file di configurazione e fa rebuild completo Docker.
         """
-        logger.info("Using internal update method")
+        logger.info("Using internal update method (same logic as remote script)")
         
         agent_dir = "/opt/dadude-agent"
+        compose_dir = os.path.join(agent_dir, "dadude-agent")
         
         try:
             import shutil
+            import tempfile
+            import re
+            import json
+            import datetime
             
-            # Verifica repository git
+            # Step 1: Verifica repository git
             git_dir = os.path.join(agent_dir, ".git")
             if not os.path.exists(git_dir):
-                return CommandResult(
-                    success=False,
-                    status="error",
-                    error="Agent directory is not a git repository. Please run update script manually from host.",
+                logger.warning("Directory is not a git repository, initializing...")
+                init_result = subprocess.run(
+                    ["git", "init"],
+                    cwd=agent_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
                 )
+                if init_result.returncode == 0:
+                    subprocess.run(
+                        ["git", "remote", "add", "origin", "https://github.com/grandir66/Dadude.git"],
+                        cwd=agent_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+                else:
+                    return CommandResult(
+                        success=False,
+                        status="error",
+                        error="Agent directory is not a git repository and cannot initialize it.",
+                    )
             
-            # Backup .env files
-            env_file = os.path.join(agent_dir, ".env")
-            env_file_subdir = os.path.join(agent_dir, "dadude-agent", ".env")
-            env_backups = {}
-            
-            for env_path in [env_file, env_file_subdir]:
-                if os.path.exists(env_path):
-                    import tempfile
-                    backup = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.env.backup')
-                    with open(env_path, 'r') as f:
-                        backup.write(f.read())
-                    backup.close()
-                    env_backups[env_path] = backup.name
-                    logger.info(f"Backed up {env_path}")
-            
-            # Fetch updates
-            logger.info("Fetching latest code...")
+            # Step 2: Fetch updates
+            logger.info("[2/8] Fetching latest code from GitHub...")
             fetch_result = subprocess.run(
                 ["git", "fetch", "origin", "main"],
                 cwd=agent_dir,
@@ -742,19 +749,97 @@ class CommandHandler:
                 timeout=60,
             )
             if fetch_result.returncode != 0:
-                # Ripristina backup
-                for env_path, backup_path in env_backups.items():
-                    if os.path.exists(backup_path):
-                        shutil.copy(backup_path, env_path)
-                        os.unlink(backup_path)
                 return CommandResult(
                     success=False,
                     status="error",
                     error=f"Git fetch failed: {fetch_result.stderr[:200]}",
                 )
             
-            # Reset hard
-            logger.info("Resetting to origin/main...")
+            # Step 3: Backup file di configurazione
+            logger.info("[3/8] Backing up configuration files...")
+            env_backups = {}
+            config_backup_dir = None
+            
+            # Backup .env principale
+            env_file = os.path.join(agent_dir, ".env")
+            if os.path.exists(env_file):
+                backup = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.env.backup')
+                with open(env_file, 'r') as f:
+                    backup.write(f.read())
+                backup.close()
+                env_backups[env_file] = backup.name
+                logger.info(f"Backed up {env_file}")
+            
+            # Backup .env subdirectory
+            env_file_subdir = os.path.join(compose_dir, ".env")
+            if os.path.exists(env_file_subdir):
+                backup = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.env.backup')
+                with open(env_file_subdir, 'r') as f:
+                    backup.write(f.read())
+                backup.close()
+                env_backups[env_file_subdir] = backup.name
+                logger.info(f"Backed up {env_file_subdir}")
+            
+            # Backup directory config personalizzati
+            config_dir = os.path.join(compose_dir, "config")
+            if os.path.exists(config_dir) and os.path.isdir(config_dir):
+                config_backup_dir = tempfile.mkdtemp(prefix="dadude_config_backup_")
+                shutil.copytree(config_dir, os.path.join(config_backup_dir, "config"), dirs_exist_ok=True)
+                logger.info(f"Backed up config directory to {config_backup_dir}")
+            
+            # Step 4: Verifica versione corrente
+            logger.info("[4/8] Checking current version...")
+            current_commit_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=agent_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            current_commit = current_commit_result.stdout.strip()[:8] if current_commit_result.returncode == 0 else "unknown"
+            
+            remote_commit_result = subprocess.run(
+                ["git", "rev-parse", "origin/main"],
+                cwd=agent_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            remote_commit = remote_commit_result.stdout.strip()[:8] if remote_commit_result.returncode == 0 else "unknown"
+            
+            # Leggi versione corrente dal file
+            current_version = "unknown"
+            agent_py_file = os.path.join(compose_dir, "app", "agent.py")
+            if os.path.exists(agent_py_file):
+                try:
+                    with open(agent_py_file, 'r') as f:
+                        content = f.read()
+                        match = re.search(r'AGENT_VERSION\s*=\s*["\']([^"\']+)["\']', content)
+                        if match:
+                            current_version = match.group(1)
+                except:
+                    pass
+            
+            logger.info(f"   Current commit: {current_commit}")
+            logger.info(f"   Remote commit:   {remote_commit}")
+            logger.info(f"   Current version: v{current_version}")
+            
+            if current_commit == remote_commit and current_commit != "unknown":
+                logger.info("Already up to date")
+                # Cleanup backups
+                for backup_path in env_backups.values():
+                    if os.path.exists(backup_path):
+                        os.unlink(backup_path)
+                if config_backup_dir and os.path.exists(config_backup_dir):
+                    shutil.rmtree(config_backup_dir)
+                return CommandResult(
+                    success=True,
+                    status="success",
+                    data={"message": "Already at latest version", "version": current_version},
+                )
+            
+            # Step 5: Applicazione aggiornamenti
+            logger.info("[5/8] Applying updates...")
             reset_result = subprocess.run(
                 ["git", "reset", "--hard", "origin/main"],
                 cwd=agent_dir,
@@ -763,89 +848,168 @@ class CommandHandler:
                 timeout=60,
             )
             
-            # Ripristina .env files
-            for env_path, backup_path in env_backups.items():
-                if os.path.exists(backup_path):
-                    if not os.path.exists(env_path) or os.path.getsize(env_path) == 0:
+            if reset_result.returncode != 0:
+                # Ripristina backup in caso di errore
+                for env_path, backup_path in env_backups.items():
+                    if os.path.exists(backup_path):
                         os.makedirs(os.path.dirname(env_path), exist_ok=True)
                         shutil.copy(backup_path, env_path)
-                        logger.info(f"Restored {env_path}")
-                    os.unlink(backup_path)
-            
-            # Assicura che .env esista in dadude-agent/
-            if os.path.exists(env_file) and not os.path.exists(env_file_subdir):
-                os.makedirs(os.path.dirname(env_file_subdir), exist_ok=True)
-                shutil.copy(env_file, env_file_subdir)
-                logger.info("Copied .env to dadude-agent/ directory")
-            
-            if reset_result.returncode != 0:
+                        os.unlink(backup_path)
                 return CommandResult(
                     success=False,
                     status="error",
                     error=f"Git reset failed: {reset_result.stderr[:200]}",
                 )
             
-            logger.info("Git update completed successfully")
+            # Leggi nuova versione
+            new_version = "unknown"
+            if os.path.exists(agent_py_file):
+                try:
+                    with open(agent_py_file, 'r') as f:
+                        content = f.read()
+                        match = re.search(r'AGENT_VERSION\s*=\s*["\']([^"\']+)["\']', content)
+                        if match:
+                            new_version = match.group(1)
+                except:
+                    pass
             
-            # Prova a riavviare il container Docker
-            agent_compose_dir = agent_dir
-            if not os.path.exists(os.path.join(agent_compose_dir, "docker-compose.yml")):
-                agent_compose_dir = os.path.join(agent_dir, "dadude-agent")
+            logger.info(f"   New version: v{new_version}")
             
-            if os.path.exists(os.path.join(agent_compose_dir, "docker-compose.yml")):
-                logger.info("Rebuilding Docker image...")
-                
-                # Build
+            # Step 6: Ripristino file di configurazione
+            logger.info("[6/8] Restoring configuration files...")
+            
+            # Ripristina .env principale
+            if env_file in env_backups and os.path.exists(env_backups[env_file]):
+                os.makedirs(os.path.dirname(env_file), exist_ok=True)
+                shutil.copy(env_backups[env_file], env_file)
+                logger.info(f"Restored {env_file}")
+            
+            # Ripristina .env subdirectory
+            if env_file_subdir in env_backups and os.path.exists(env_backups[env_file_subdir]):
+                os.makedirs(os.path.dirname(env_file_subdir), exist_ok=True)
+                shutil.copy(env_backups[env_file_subdir], env_file_subdir)
+                logger.info(f"Restored {env_file_subdir}")
+            elif env_file in env_backups and os.path.exists(env_backups[env_file]):
+                # Se non esiste backup subdirectory, copia dalla root
+                os.makedirs(os.path.dirname(env_file_subdir), exist_ok=True)
+                shutil.copy(env_file, env_file_subdir)
+                logger.info("Copied .env to subdirectory")
+            
+            # Ripristina config personalizzati
+            if config_backup_dir and os.path.exists(os.path.join(config_backup_dir, "config")):
+                os.makedirs(config_dir, exist_ok=True)
+                shutil.copytree(
+                    os.path.join(config_backup_dir, "config"),
+                    config_dir,
+                    dirs_exist_ok=True
+                )
+                logger.info("Restored config directory")
+            
+            # Cleanup backup files
+            for backup_path in env_backups.values():
+                if os.path.exists(backup_path):
+                    os.unlink(backup_path)
+            if config_backup_dir and os.path.exists(config_backup_dir):
+                shutil.rmtree(config_backup_dir)
+            
+            # Step 7: Rebuild immagine Docker
+            logger.info("[7/8] Rebuilding Docker image...")
+            
+            # Verifica docker-compose.yml
+            compose_file = os.path.join(compose_dir, "docker-compose.yml")
+            if not os.path.exists(compose_file):
+                # Cerca nella root
+                compose_file = os.path.join(agent_dir, "docker-compose.yml")
+                if os.path.exists(compose_file):
+                    compose_dir = agent_dir
+            
+            if os.path.exists(compose_file):
                 build_result = subprocess.run(
                     ["docker", "compose", "build", "--quiet"],
-                    cwd=agent_compose_dir,
+                    cwd=compose_dir,
                     capture_output=True,
                     text=True,
                     timeout=300,
                 )
                 
-                if build_result.returncode == 0:
-                    logger.info("Docker build completed. Preparing for restart...")
-                    
-                    # IMPORTANTE: Non possiamo riavviare il container da dentro il container stesso.
-                    # Soluzione: Creiamo un file di flag che indica che il container deve essere riavviato.
-                    # Un processo esterno (come uno script di monitoraggio) può riavviare il container
-                    # quando vede questo flag.
-                    
+                if build_result.returncode != 0:
+                    return CommandResult(
+                        success=False,
+                        status="error",
+                        error=f"Docker build failed: {build_result.stderr[:200]}",
+                    )
+                
+                logger.info("Docker build completed")
+                
+                # Step 8: Riavvio container con force-recreate
+                logger.info("[8/8] Restarting container with force-recreate...")
+                
+                # Prova docker compose up -d --force-recreate
+                # Questo dovrebbe funzionare se abbiamo accesso al socket Docker
+                recreate_result = subprocess.run(
+                    ["docker", "compose", "up", "-d", "--force-recreate"],
+                    cwd=compose_dir,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                
+                if recreate_result.returncode == 0:
+                    logger.success("Container restarted successfully")
+                    return CommandResult(
+                        success=True,
+                        status="success",
+                        data={
+                            "message": "Update completed successfully",
+                            "old_version": current_version,
+                            "new_version": new_version,
+                            "output": recreate_result.stdout,
+                        },
+                    )
+                else:
+                    # Se force-recreate fallisce, crea flag file per restart esterno
                     restart_flag_file = os.path.join(agent_dir, ".restart_required")
                     try:
                         with open(restart_flag_file, 'w') as f:
-                            import json
-                            import datetime
                             f.write(json.dumps({
                                 "timestamp": datetime.datetime.utcnow().isoformat(),
                                 "reason": "update_completed",
-                                "new_image": "dadude-agent:latest",
+                                "new_version": new_version,
+                                "compose_dir": compose_dir,
                             }))
-                        logger.info(f"Created restart flag file: {restart_flag_file}")
+                        logger.warning(f"Created restart flag file: {restart_flag_file}")
+                        logger.info("Please restart container manually or wait for external watchdog")
                     except Exception as e:
                         logger.warning(f"Could not create restart flag file: {e}")
                     
-                    # Prova anche a eseguire docker restart in background usando nohup
-                    # Questo potrebbe funzionare se il processo viene eseguito abbastanza velocemente
-                    try:
-                        import os
-                        import sys
-                        
-                        # Crea uno script che esegue il restart dopo un breve delay
-                        restart_script_content = f"""#!/bin/bash
-sleep 3
-cd {agent_compose_dir}
-docker compose up -d --force-recreate 2>&1 | logger -t dadude-update
-"""
-                        restart_script = os.path.join(agent_compose_dir, ".auto_restart.sh")
-                        with open(restart_script, 'w') as f:
-                            f.write(restart_script_content)
-                        os.chmod(restart_script, 0o755)
-                        
-                        # Esegui lo script in background usando nohup e disown
-                        # Questo dovrebbe permettere al processo di continuare anche dopo che il container si ferma
-                        subprocess.Popen(
+                    return CommandResult(
+                        success=True,
+                        status="success",
+                        data={
+                            "message": "Update completed, restart required",
+                            "old_version": current_version,
+                            "new_version": new_version,
+                            "restart_flag": restart_flag_file,
+                            "warning": "Container restart may require manual intervention",
+                        },
+                    )
+            else:
+                logger.warning("docker-compose.yml not found, skipping Docker rebuild")
+                return CommandResult(
+                    success=True,
+                    status="success",
+                    data={
+                        "message": "Git update completed, but Docker rebuild skipped (no docker-compose.yml)",
+                        "old_version": current_version,
+                        "new_version": new_version,
+                    },
+                )
+            
+        except subprocess.TimeoutExpired as e:
+            return CommandResult(success=False, status="error", error=f"Update timed out: {e}")
+        except Exception as e:
+            logger.error(f"Update error: {e}")
+            return CommandResult(success=False, status="error", error=str(e))
                             ["nohup", "bash", restart_script, ">", "/dev/null", "2>&1", "&"],
                             shell=True,
                             cwd=agent_compose_dir,
