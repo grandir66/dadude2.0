@@ -1380,13 +1380,33 @@ async function updateServer() {
 }
 
 async function restartServer() {
+    if (!confirm('Riavviare il server DaDude?\n\nIl server sarà temporaneamente non disponibile durante il riavvio.')) {
+        return;
+    }
+    
     try {
         const response = await fetch('/api/v1/agents/server/restart', {
             method: 'POST'
         });
         const data = await response.json();
         
-        alert(data.message + (data.command ? `\n\nComando: ${data.command}` : ''));
+        if (data.success && data.restarted) {
+            // Riavvio automatico completato, ricarica la pagina
+            alert(data.message);
+            setTimeout(() => window.location.reload(), 5000);
+        } else if (data.success) {
+            alert(data.message);
+        } else {
+            // Riavvio automatico fallito, mostra comando manuale
+            let message = data.message || 'Riavvio fallito';
+            if (data.command) {
+                message += `\n\nEsegui manualmente:\n${data.command}`;
+            }
+            if (data.error) {
+                message += `\n\nErrore: ${data.error}`;
+            }
+            alert(message);
+        }
     } catch (e) {
         // Il server potrebbe non rispondere durante il riavvio
         alert('Comando di riavvio inviato. La pagina si ricaricherà tra 5 secondi...');
