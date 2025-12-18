@@ -1597,4 +1597,118 @@ docker compose up -d --force-recreate 2>&1 | logger -t dadude-update
         except Exception as e:
             logger.error(f"[SSH] Error: {e}")
             return CommandResult(success=False, status="error", error=str(e))
+    
+    async def _update_agent_proxmox(self, params: Dict) -> CommandResult:
+        """
+        Aggiorna un agent su Proxmox LXC da dentro il container agent.
+        
+        Params:
+            proxmox_ip: str - IP del server Proxmox
+            container_id: str - ID del container LXC (es: "600", "610")
+            ssh_user: str - Username SSH (default: "root")
+            ssh_password: Optional[str] - Password SSH (se non usa key)
+            ssh_key: Optional[str] - Private key SSH
+            ssh_port: int - Porta SSH (default: 22)
+        """
+        proxmox_ip = params.get("proxmox_ip")
+        container_id = params.get("container_id")
+        ssh_user = params.get("ssh_user", "root")
+        ssh_password = params.get("ssh_password")
+        ssh_key = params.get("ssh_key")
+        ssh_port = params.get("ssh_port", 22)
+        
+        if not proxmox_ip or not container_id:
+            return CommandResult(
+                success=False,
+                status="error",
+                error="proxmox_ip and container_id are required"
+            )
+        
+        logger.info(f"[PROXMOX UPDATE] Updating agent on Proxmox {proxmox_ip}, container {container_id}")
+        
+        try:
+            import paramiko
+            from io import StringIO
+            
+            # Comando da eseguire sul Proxmox
+            update_command = f"""pct exec {container_id} -- bash -c '
+                cd /opt/dadude-agent/dadude-agent 2>/dev/null || cd /opt/dadude-agent || exit 1
+                echo "1. Fetching latest changes..."
+                git fetch origin main 2>&1
+                echo "2. Checking versions..."
+                CURRENT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+                LATEST=$(git rev-parse origin/main 2>/dev/null || echo "unknown")
+                echo "   Current: ${CURRENT:0:8}"
+                echo "   Latest:  ${LATEST:0:8}"
+                if [ "$CURRENT" != "$LATEST" ] && [ "$LATEST" != "unknown" ]; then
+                    echo "3. Update available! Applying..."
+                    git reset --hard origin/main 2>&1
+                    echo "4. Restarting agent container..."
+                    docker restart dadude-agent 2>&1 || docker compose restart 2>&1
+                    echo "✅ Update completed"
+                else
+                    echo "3. Already up to date"
+                fi
+            '"""
+            
+            # Connetti via SSH
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            connect_kwargs = {
+                "hostname": proxmox_ip,
+                "port": ssh_port,
+                "username": ssh_user,
+                "timeout": 30,
+                "allow_agent": False,
+                "look_for_keys": False,
+            }
+            
+            if ssh_key:
+                key_file = StringIO(ssh_key)
+                key = paramiko.RSAKey.from_private_key(key_file)
+                connect_kwargs["pkey"] = key
+            else:
+                connect_kwargs["password"] = ssh_password
+            
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: ssh.connect(**connect_kwargs))
+            
+            # Esegui comando
+            stdin, stdout, stderr = await loop.run_in_executor(
+                None,
+                lambda: ssh.exec_command(update_command, timeout=120)
+            )
+            
+            output = stdout.read().decode()
+            error_output = stderr.read().decode()
+            exit_status = stdout.channel.recv_exit_status()
+            
+            ssh.close()
+            
+            if exit_status == 0:
+                logger.success(f"[PROXMOX UPDATE] Agent updated successfully on {proxmox_ip}:{container_id}")
+                return CommandResult(
+                    success=True,
+                    status="success",
+                    data={
+                        "message": f"Agent updated on Proxmox {proxmox_ip}, container {container_id}",
+                        "output": output,
+                    }
+                )
+            else:
+                logger.error(f"[PROXMOX UPDATE] Update failed: {error_output}")
+                return CommandResult(
+                    success=False,
+                    status="error",
+                    error=f"Update failed: {error_output or output}",
+                )
+                
+        except paramiko.AuthenticationException:
+            return CommandResult(success=False, status="error", error="SSH authentication failed")
+        except paramiko.SSHException as e:
+            return CommandResult(success=False, status="error", error=f"SSH error: {e}")
+        except Exception as e:
+            logger.error(f"[PROXMOX UPDATE] Error: {e}")
+            return CommandResult(success=False, status="error", error=str(e))
 
