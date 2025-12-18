@@ -210,6 +210,8 @@ class CommandHandler:
         
         elif action == CommandAction.EXEC_SSH.value:
             return await self._exec_ssh(params)
+        elif action == CommandAction.UPDATE_AGENT_PROXMOX.value:
+            return await self._update_agent_proxmox(params)
         
         else:
             return CommandResult(
