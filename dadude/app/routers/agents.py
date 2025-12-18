@@ -427,7 +427,7 @@ async def list_pending_agents():
 # ==========================================
 
 # Versione corrente del server
-SERVER_VERSION = "2.3.23"
+SERVER_VERSION = "2.3.24"
 GITHUB_REPO = "grandir66/dadude"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}"
 
@@ -809,6 +809,9 @@ async def trigger_server_update():
         # Se il codice è montato (non copiato), git pull è sufficiente e serve solo riavvio
         # Se il codice è copiato nel Dockerfile, serve rebuild (ma non lo facciamo più automaticamente)
         code_is_mounted = False
+        restart_success = False
+        restart_output = ""
+        
         if os.path.exists("/.dockerenv"):
             # Verifica se /app/app è un mount point (volume montato)
             try:
@@ -823,15 +826,49 @@ async def trigger_server_update():
                 # Controlla se /app/app è un symlink o se esiste /app/repo/dadude/app
                 if os.path.exists("/app/repo/dadude/app"):
                     code_is_mounted = True
-        
-        # Se il codice è montato come volume, git pull è sufficiente
-        # Serve solo riavvio per ricaricare i moduli Python
-        if code_is_mounted:
-            messages.append("✅ Codice montato come volume - git pull applicato")
-            logger.info("Code is mounted as volume, git pull is sufficient")
-        elif rebuild_needed:
-            messages.append("⚠️ Codice copiato nel Dockerfile - serve rebuild manuale:")
-            messages.append(f"   cd {compose_dir or project_dir} && docker compose up -d --build")
+            
+            # Se il codice è montato e serve riavvio, riavvia automaticamente il container
+            if code_is_mounted and needs_restart:
+                try:
+                    # Riavvia il container usando Docker CLI
+                    docker_sock = "/var/run/docker.sock"
+                    if os.path.exists(docker_sock):
+                        # Ottieni il nome del container (di solito "dadude")
+                        container_name = os.getenv("HOSTNAME", "dadude")
+                        
+                        restart_result = subprocess.run(
+                            ["docker", "restart", container_name],
+                            capture_output=True,
+                            text=True,
+                            timeout=30
+                        )
+                        
+                        restart_output = restart_result.stdout + "\n" + restart_result.stderr
+                        
+                        if restart_result.returncode == 0:
+                            restart_success = True
+                            messages.append("✅ Container riavviato automaticamente")
+                            logger.info(f"Container {container_name} restarted successfully")
+                        else:
+                            logger.warning(f"Container restart failed: {restart_output}")
+                            messages.append("⚠️ Riavvio automatico fallito - esegui manualmente:")
+                            messages.append(f"   docker restart {container_name}")
+                    else:
+                        messages.append("⚠️ Socket Docker non accessibile - esegui manualmente:")
+                        messages.append("   docker restart dadude")
+                        logger.warning("Docker socket not accessible, cannot restart container")
+                except subprocess.TimeoutExpired:
+                    messages.append("⚠️ Timeout durante riavvio - esegui manualmente: docker restart dadude")
+                    logger.error("Container restart timed out")
+                except Exception as e:
+                    logger.error(f"Failed to restart container: {e}")
+                    messages.append(f"⚠️ Errore riavvio: {str(e)[:50]} - esegui manualmente: docker restart dadude")
+            elif code_is_mounted:
+                messages.append("✅ Codice montato come volume - git pull applicato")
+                logger.info("Code is mounted as volume, git pull is sufficient")
+            elif rebuild_needed:
+                messages.append("⚠️ Codice copiato nel Dockerfile - serve rebuild manuale:")
+                messages.append(f"   cd {compose_dir or project_dir} && docker compose up -d --build")
         
         return {
             "success": True,
@@ -839,7 +876,9 @@ async def trigger_server_update():
             "message": " | ".join(messages),
             "output": output,
             "code_is_mounted": code_is_mounted if os.path.exists("/.dockerenv") else None,
-            "needs_restart": needs_restart and not code_is_mounted,  # Se codice montato, serve riavvio per ricaricare moduli
+            "restart_success": restart_success if code_is_mounted and needs_restart else None,
+            "restart_output": restart_output if code_is_mounted and needs_restart else None,
+            "needs_restart": needs_restart and not restart_success,  # Serve riavvio solo se non già fatto automaticamente
             "version_changed": new_version != old_version if new_version and old_version else False,
             "version_disk_different": needs_restart_after_update,
             "current_version_memory": SERVER_VERSION,

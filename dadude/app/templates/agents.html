@@ -1302,13 +1302,20 @@ async function updateServer() {
             if (data.already_up_to_date) {
                 if (data.version_disk_different) {
                     // Repository aggiornato ma serve riavvio
-                    message = `⚠️ Riavvio necessario!\n\n`;
-                    message += `Versione in memoria: v${data.current_version_memory}\n`;
-                    message += `Versione su disco: v${data.current_version_disk}\n\n`;
-                    message += `Il repository è aggiornato ma il server deve essere riavviato per applicare le modifiche.`;
-                    
-                    if (confirm(message + '\n\nVuoi riavviare il server ora?')) {
-                        await restartServer();
+                    if (data.restart_success) {
+                        message = `✅ Aggiornamento completato!\n\n`;
+                        message += `Versione: v${data.current_version_disk}\n`;
+                        message += `Container riavviato automaticamente.`;
+                        alert(message);
+                    } else {
+                        message = `⚠️ Riavvio necessario!\n\n`;
+                        message += `Versione in memoria: v${data.current_version_memory}\n`;
+                        message += `Versione su disco: v${data.current_version_disk}\n\n`;
+                        message += `Il repository è aggiornato ma il server deve essere riavviato per applicare le modifiche.`;
+                        
+                        if (confirm(message + '\n\nVuoi riavviare il server ora?')) {
+                            await restartServer();
+                        }
                     }
                 } else {
                     alert('✅ Server già aggiornato');
@@ -1324,14 +1331,19 @@ async function updateServer() {
                 if (data.release_created) {
                     message += `✅ Release v${data.new_version} creata su GitHub\n`;
                 }
-                message += data.needs_restart ? '\n⚠️ Riavvio necessario per applicare le modifiche.' : '';
                 
-                alert(message);
-                
-                if (data.needs_restart) {
+                if (data.restart_success) {
+                    message += `\n✅ Container riavviato automaticamente.`;
+                    alert(message);
+                } else if (data.needs_restart) {
+                    message += '\n⚠️ Riavvio necessario per applicare le modifiche.';
+                    alert(message);
+                    
                     if (confirm('Vuoi riavviare il server ora?')) {
                         await restartServer();
                     }
+                } else {
+                    alert(message);
                 }
             }
         } else {
