@@ -843,7 +843,24 @@ async def _delayed_restart(delay_seconds: int):
     await asyncio.sleep(delay_seconds)
     logger.warning(f"Restarting agent...")
     
+    # Chiudi tutte le connessioni e task in corso prima di riavviare
+    try:
+        # Annulla tutti i task in corso
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        
+        # Attendi che i task vengano cancellati (con timeout)
+        if tasks:
+            await asyncio.wait(tasks, timeout=5.0)
+        
+        logger.info("All tasks cancelled, restarting...")
+    except Exception as e:
+        logger.warning(f"Error during graceful shutdown: {e}")
+    
     # In Docker, usciamo con codice 0 per trigger restart policy
+    # Il container Docker si riavvierà automaticamente
+    # Usa os._exit invece di sys.exit per evitare problemi con cleanup
     os._exit(0)
 
 
