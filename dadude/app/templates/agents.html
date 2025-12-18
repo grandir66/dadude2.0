@@ -1182,11 +1182,32 @@ async function loadServerVersion() {
     try {
         // Carica versione corrente
         const versionResponse = await fetch('/api/v1/agents/server/version');
+        if (!versionResponse.ok) {
+            throw new Error(`HTTP ${versionResponse.status}`);
+        }
         const versionData = await versionResponse.json();
-        document.getElementById('server-version').textContent = `v${versionData.version}`;
+        
+        // Aggiorna versione server
+        const serverVersionEl = document.getElementById('server-version');
+        if (serverVersionEl) {
+            serverVersionEl.textContent = `v${versionData.version || 'N/A'}`;
+        }
+        
+        // Aggiorna versione agent (se disponibile)
+        const agentVersionEl = document.getElementById('agent-version');
+        if (agentVersionEl) {
+            if (versionData.agent_version) {
+                agentVersionEl.textContent = `v${versionData.agent_version}`;
+            } else {
+                agentVersionEl.textContent = 'N/A';
+            }
+        }
         
         // Controlla aggiornamenti
         const updateResponse = await fetch('/api/v1/agents/server/check-update');
+        if (!updateResponse.ok) {
+            throw new Error(`HTTP ${updateResponse.status}`);
+        }
         const updateData = await updateResponse.json();
         
         if (updateData.success) {
@@ -1225,6 +1246,7 @@ async function loadServerVersion() {
     } catch (e) {
         console.error('Error loading server version:', e);
         document.getElementById('server-version').textContent = 'Errore';
+        document.getElementById('agent-version').textContent = 'Errore';
     }
 }
 
