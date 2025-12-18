@@ -338,11 +338,22 @@ pct exec $CONTAINER_ID -- bash -c \"cd \${COMPOSE_DIR} && docker compose up -d -
 }
 
 # Attendi avvio
+echo \"   Attendo avvio container...\"
 sleep 5
 
-# Verifica stato
-CONTAINER_STATUS=\$(pct exec $CONTAINER_ID -- docker ps --filter name=dadude-agent --format '{{.Status}}' 2>/dev/null || echo '')
-if echo \"\$CONTAINER_STATUS\" | grep -q \"Up\"; then
+# Verifica stato - controlla più volte per container che si riavviano
+MAX_CHECKS=6
+CONTAINER_UP=false
+for i in \$(seq 1 \$MAX_CHECKS); do
+    CONTAINER_STATUS=\$(pct exec $CONTAINER_ID -- docker ps --filter name=dadude-agent --format '{{.Status}}' 2>/dev/null || echo '')
+    if echo \"\$CONTAINER_STATUS\" | grep -q \"Up\" && ! echo \"\$CONTAINER_STATUS\" | grep -q \"Restarting\"; then
+        CONTAINER_UP=true
+        break
+    fi
+    sleep 2
+done
+
+if [ \"\$CONTAINER_UP\" = true ]; then
     echo \"SUCCESS: Container avviato correttamente\"
     
     # Verifica versione nei log
@@ -352,8 +363,26 @@ if echo \"\$CONTAINER_STATUS\" | grep -q \"Up\"; then
         echo \"   Versione nei log: v\$LOG_VERSION\"
     fi
 else
-    echo \"ERROR: Container non avviato correttamente\"
+    echo \"ERROR: Container non avviato correttamente o in loop di riavvio\"
+    echo \"\"
+    echo \"Stato container:\"
     pct exec $CONTAINER_ID -- docker ps -a --filter name=dadude-agent
+    echo \"\"
+    echo \"Ultimi log del container (ultimi 50 righe):\"
+    pct exec $CONTAINER_ID -- docker logs dadude-agent --tail 50 2>&1 || echo \"Impossibile leggere log\"
+    echo \"\"
+    echo \"SOLUZIONI:\"
+    echo \"1. Verifica configurazione .env:\"
+    echo \"   pct exec $CONTAINER_ID -- cat /opt/dadude-agent/dadude-agent/.env\"
+    echo \"\"
+    echo \"2. Verifica docker-compose.yml:\"
+    echo \"   pct exec $CONTAINER_ID -- cat /opt/dadude-agent/dadude-agent/docker-compose.yml\"
+    echo \"\"
+    echo \"3. Prova a riavviare manualmente:\"
+    echo \"   pct exec $CONTAINER_ID -- docker restart dadude-agent\"
+    echo \"\"
+    echo \"4. Verifica log in tempo reale:\"
+    echo \"   pct exec $CONTAINER_ID -- docker logs -f dadude-agent\"
     exit 1
 fi
 
