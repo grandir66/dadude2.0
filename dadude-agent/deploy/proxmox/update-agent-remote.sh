@@ -65,19 +65,59 @@ if ! pct exec $CONTAINER_ID -- test -d \"\${AGENT_DIR}\" 2>/dev/null; then
     exit 1
 fi
 
-echo \"[1/6] Verifica repository git...\"
+echo \"[1/7] Verifica connettività internet e DNS...\"
+# Verifica risoluzione DNS
+if ! pct exec $CONTAINER_ID -- nslookup github.com >/dev/null 2>&1; then
+    echo \"WARNING: DNS non risolve github.com, verifica configurazione...\"
+    # Prova a verificare se c'è un DNS configurato
+    DNS_SERVERS=\$(pct exec $CONTAINER_ID -- cat /etc/resolv.conf 2>/dev/null | grep nameserver | awk '{print \$2}' | head -1 || echo '')
+    if [ -z \"\$DNS_SERVERS\" ]; then
+        echo \"ERROR: Nessun DNS server configurato nel container\"
+        echo \"SOLUZIONE: Configura DNS nel container LXC:\"
+        echo \"  pct set $CONTAINER_ID --nameserver 8.8.8.8\"
+        echo \"  oppure\"
+        echo \"  pct set $CONTAINER_ID --nameserver 192.168.99.1\"
+        exit 1
+    else
+        echo \"   DNS configurato: \$DNS_SERVERS\"
+        echo \"   Verifica connettività...\"
+        if ! pct exec $CONTAINER_ID -- ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+            echo \"ERROR: Container non ha connettività internet\"
+            echo \"SOLUZIONE: Verifica configurazione rete del container LXC\"
+            exit 1
+        fi
+        echo \"   Connettività OK, ma DNS potrebbe non funzionare correttamente\"
+        echo \"   Tentativo con IP diretto di GitHub...\"
+    fi
+else
+    echo \"   DNS OK\"
+fi
+
+echo \"[2/7] Verifica repository git...\"
 if ! pct exec $CONTAINER_ID -- test -d \"\${AGENT_DIR}/.git\" 2>/dev/null; then
     echo \"WARNING: Directory non è un repository git, inizializzazione...\"
     pct exec $CONTAINER_ID -- bash -c \"cd \${AGENT_DIR} && git init && git remote add origin https://github.com/grandir66/Dadude.git || true\"
 fi
 
-echo \"[2/6] Fetch aggiornamenti da GitHub...\"
-pct exec $CONTAINER_ID -- bash -c \"cd \${AGENT_DIR} && git fetch origin main 2>&1\" || {
+echo \"[3/7] Fetch aggiornamenti da GitHub...\"
+FETCH_OUTPUT=\$(pct exec $CONTAINER_ID -- bash -c \"cd \${AGENT_DIR} && git fetch origin main 2>&1\" || echo \"FETCH_FAILED\")
+if echo \"\$FETCH_OUTPUT\" | grep -q \"FETCH_FAILED\|fatal\|Could not resolve host\"; then
     echo \"ERROR: Git fetch fallito\"
+    echo \"Output: \$FETCH_OUTPUT\"
+    echo \"\"
+    echo \"SOLUZIONI:\"
+    echo \"1. Configura DNS nel container:\"
+    echo \"   pct set $CONTAINER_ID --nameserver 8.8.8.8\"
+    echo \"\"
+    echo \"2. Verifica connettività internet:\"
+    echo \"   pct exec $CONTAINER_ID -- ping -c 3 8.8.8.8\"
+    echo \"\"
+    echo \"3. Verifica gateway del container:\"
+    echo \"   pct exec $CONTAINER_ID -- ip route\"
     exit 1
-}
+fi
 
-echo \"[3/6] Backup file di configurazione...\"
+echo \"[4/8] Backup file di configurazione...\"
 # Backup file .env principale
 ENV_BACKUP_ROOT=\"\"
 ENV_BACKUP_SUBDIR=\"\"
@@ -104,7 +144,7 @@ if pct exec $CONTAINER_ID -- test -d \"\${COMPOSE_DIR}/config\" 2>/dev/null; the
     fi
 fi
 
-echo \"[4/6] Verifica versione corrente...\"
+echo \"[5/8] Verifica versione corrente...\"
 CURRENT_COMMIT=\$(pct exec $CONTAINER_ID -- bash -c \"cd \${AGENT_DIR} && git rev-parse HEAD 2>/dev/null || echo 'unknown'\")
 REMOTE_COMMIT=\$(pct exec $CONTAINER_ID -- bash -c \"cd \${AGENT_DIR} && git rev-parse origin/main 2>/dev/null || echo 'unknown'\")
 CURRENT_VERSION=\$(pct exec $CONTAINER_ID -- bash -c \"cd \${AGENT_DIR}/dadude-agent && grep -oP 'AGENT_VERSION\\s*=\\s*\\\"\\K[^\\\"]+' app/agent.py 2>/dev/null || echo 'unknown'\")
@@ -122,7 +162,7 @@ if [ \"\$CURRENT_COMMIT\" = \"\$REMOTE_COMMIT\" ] && [ \"\$CURRENT_COMMIT\" != \
     exit 0
 fi
 
-echo \"[5/6] Applicazione aggiornamenti...\"
+echo \"[6/8] Applicazione aggiornamenti...\"
 pct exec $CONTAINER_ID -- bash -c \"cd \${AGENT_DIR} && git reset --hard origin/main 2>&1\" || {
     echo \"ERROR: Git reset fallito\"
     # Ripristina backup in caso di errore
@@ -136,7 +176,7 @@ pct exec $CONTAINER_ID -- bash -c \"cd \${AGENT_DIR} && git reset --hard origin/
 NEW_VERSION=\$(pct exec $CONTAINER_ID -- bash -c \"cd \${AGENT_DIR}/dadude-agent && grep -oP 'AGENT_VERSION\\s*=\\s*\\\"\\K[^\\\"]+' app/agent.py 2>/dev/null || echo 'unknown'\")
 echo \"   Nuova versione: v\${NEW_VERSION}\"
 
-echo \"[6/7] Ripristino file di configurazione...\"
+echo \"[7/8] Ripristino file di configurazione...\"
 # Ripristina .env principale
 if [ -n \"\$ENV_BACKUP_ROOT\" ] && [ -f \"\$ENV_BACKUP_ROOT\" ]; then
     pct exec $CONTAINER_ID -- bash -c \"cat > \${AGENT_DIR}/.env\" < \"\$ENV_BACKUP_ROOT\"
@@ -162,7 +202,7 @@ if [ -n \"\$CONFIG_BACKUP\" ] && [ -d \"\$CONFIG_BACKUP/config\" ]; then
     echo \"   Directory config ripristinata\"
 fi
 
-echo \"[7/8] Rebuild immagine Docker...\"
+echo \"[8/8] Rebuild immagine Docker...\"
 if ! pct exec $CONTAINER_ID -- test -d \"\${COMPOSE_DIR}\" 2>/dev/null; then
     echo \"WARNING: Directory \${COMPOSE_DIR} non trovata, creazione...\"
     pct exec $CONTAINER_ID -- mkdir -p \"\${COMPOSE_DIR}\"
@@ -180,7 +220,7 @@ pct exec $CONTAINER_ID -- bash -c \"cd \${COMPOSE_DIR} && docker compose build -
     exit 1
 }
 
-echo \"[8/8] Riavvio container con force-recreate...\"
+echo \"[9/9] Riavvio container con force-recreate...\"
 # Stop container esistente
 pct exec $CONTAINER_ID -- docker stop dadude-agent 2>/dev/null || true
 sleep 2
