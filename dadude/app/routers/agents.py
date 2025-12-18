@@ -427,7 +427,7 @@ async def list_pending_agents():
 # ==========================================
 
 # Versione corrente del server
-SERVER_VERSION = "2.3.26"
+SERVER_VERSION = "2.3.27"
 GITHUB_REPO = "grandir66/dadude"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}"
 
@@ -1601,10 +1601,12 @@ async def restart_agent(agent_db_id: str):
     try:
         import httpx
         
-        async with httpx.AsyncClient(timeout=10) as client:
+        # Timeout breve per evitare blocchi se l'agent non risponde
+        async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.post(
                 f"{agent.agent_url}/admin/restart",
-                headers={"Authorization": f"Bearer {agent_token}"} if agent_token else {}
+                headers={"Authorization": f"Bearer {agent_token}"} if agent_token else {},
+                follow_redirects=False
             )
             
             return {
@@ -1612,8 +1614,16 @@ async def restart_agent(agent_db_id: str):
                 "message": "Restart command sent" if response.status_code == 200 else response.text,
             }
                 
+    except httpx.TimeoutException:
+        # Timeout: l'agent potrebbe essere già in riavvio o non raggiungibile
+        logger.warning(f"Timeout restarting agent {agent_db_id}")
+        return {
+            "success": True,
+            "message": "Restart command sent (agent may be restarting or unreachable)",
+        }
     except Exception as e:
         # L'agent potrebbe disconnettersi durante il riavvio
+        logger.warning(f"Error restarting agent {agent_db_id}: {e}")
         return {
             "success": True,
             "message": "Restart command sent (agent may be restarting)",
