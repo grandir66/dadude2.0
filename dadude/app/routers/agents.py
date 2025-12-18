@@ -299,6 +299,35 @@ async def agent_heartbeat(
         if client_ip and client_ip != agent.address:
             service.update_agent_address(agent.id, client_ip)
         
+        # AUTO-REATTIVAZIONE: Se l'agent era già approvato ma non attivo (dopo restart),
+        # riattivalo automaticamente quando invia heartbeat
+        if data.status == "online" and not agent.active:
+            # Verifica che l'agent sia stato approvato (non pending)
+            if agent.status != "pending_approval":
+                try:
+                    from ..models.database import AgentAssignment as AgentAssignmentDB, init_db, get_session
+                    from ..config import get_settings
+                    
+                    settings = get_settings()
+                    db_url = settings.database_url.replace("+aiosqlite", "")
+                    engine = init_db(db_url)
+                    session = get_session(engine)
+                    
+                    try:
+                        db_agent = session.query(AgentAssignmentDB).filter(
+                            AgentAssignmentDB.id == agent.id
+                        ).first()
+                        
+                        if db_agent:
+                            db_agent.active = True
+                            db_agent.status = "online"
+                            session.commit()
+                            logger.info(f"Auto-reactivated agent {agent.id} ({data.agent_id}) after restart")
+                    finally:
+                        session.close()
+                except Exception as e:
+                    logger.warning(f"Failed to auto-reactivate agent {agent.id}: {e}")
+        
         # Controlla se ci sono comandi pendenti
         # (future: scan requests, config updates, etc.)
         
@@ -427,7 +456,7 @@ async def list_pending_agents():
 # ==========================================
 
 # Versione corrente del server
-SERVER_VERSION = "2.3.27"
+SERVER_VERSION = "2.3.28"
 GITHUB_REPO = "grandir66/dadude"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}"
 
