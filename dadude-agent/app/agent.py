@@ -531,13 +531,33 @@ class DaDudeAgent:
         
         self._running = True
         
-        # Step 1: Auto-registrazione (HTTP)
-        registered = await self._auto_register()
-        if not registered:
-            logger.warning("Auto-registration failed, will retry on reconnect")
+        # Step 1: Auto-registrazione (HTTP) - con retry infinito fino al successo
+        max_registration_retries = 10
+        registration_retry_delay = 30  # secondi
+        registered = False
         
-        # Step 2: Prova enrollment certificati (se approvato)
-        enrolled = await self._enrollment_if_needed()
+        for attempt in range(max_registration_retries):
+            registered = await self._auto_register()
+            if registered:
+                logger.success("Auto-registration successful")
+                break
+            else:
+                if attempt < max_registration_retries - 1:
+                    logger.warning(f"Auto-registration failed (attempt {attempt + 1}/{max_registration_retries}), retrying in {registration_retry_delay}s...")
+                    await asyncio.sleep(registration_retry_delay)
+                else:
+                    logger.error("Auto-registration failed after all retries, but continuing anyway")
+        
+        # Step 2: Prova enrollment certificati (se approvato) - con retry
+        enrolled = False
+        for attempt in range(3):
+            enrolled = await self._enrollment_if_needed()
+            if enrolled:
+                break
+            elif attempt < 2:
+                logger.warning(f"Enrollment failed (attempt {attempt + 1}/3), retrying in 10s...")
+                await asyncio.sleep(10)
+        
         if not enrolled:
             logger.warning("Running without mTLS certificates (token auth only)")
         
@@ -545,14 +565,26 @@ class DaDudeAgent:
         await self._store_forward.start()
         await self._scheduler.start()
         
-        logger.info("Agent running - waiting for server connection...")
+        logger.info("Agent running - connecting to server...")
         
-        # Loop principale
+        # Loop principale con retry infinito per connessione
         try:
             if self._connection_manager:
+                # ConnectionManager gestisce già retry automatici
                 await self._connection_manager.start()
             else:
-                await self._ws_client.run()
+                # WebSocket client con retry infinito
+                while self._running:
+                    try:
+                        await self._ws_client.run()
+                        # Se run() ritorna senza errore, la connessione è stata chiusa normalmente
+                        # Riprova dopo un breve delay
+                        if self._running:
+                            logger.warning("WebSocket connection closed, reconnecting in 10s...")
+                            await asyncio.sleep(10)
+                    except Exception as e:
+                        logger.error(f"WebSocket error: {e}, reconnecting in 10s...")
+                        await asyncio.sleep(10)
         except asyncio.CancelledError:
             pass
         except Exception as e:
