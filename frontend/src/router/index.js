@@ -65,6 +65,12 @@ const routes = [
     meta: { title: 'Alerts' }
   },
   {
+    path: '/credentials',
+    name: 'Credentials',
+    component: () => import('@/views/Credentials.vue'),
+    meta: { title: 'Credentials' }
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/views/Settings.vue'),

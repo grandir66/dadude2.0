@@ -138,6 +138,32 @@ export const alertsApi = {
 }
 
 // ===========================================
+// CREDENTIALS
+// ===========================================
+export const credentialsApi = {
+  getAll: (params) => api.get('/customers/credentials', { params }),
+  getById: (id) => api.get(`/customers/credentials/${id}`),
+  create: (data) => api.post('/customers/credentials', data),
+  update: (id, data) => api.put(`/customers/credentials/${id}`, data),
+  delete: (id) => api.delete(`/customers/credentials/${id}`),
+  // Global credentials
+  getGlobal: () => api.get('/customers/credentials', { params: { global_only: true } }),
+  // Test credential
+  test: (id, targetIp) => api.post(`/customers/credentials/${id}/test`, { target_ip: targetIp }),
+}
+
+// ===========================================
+// NETWORKS
+// ===========================================
+export const networksApi = {
+  getAll: (params) => api.get('/customers/networks', { params }),
+  getById: (id) => api.get(`/customers/networks/${id}`),
+  create: (customerId, data) => api.post(`/customers/${customerId}/networks`, data),
+  update: (id, data) => api.put(`/customers/networks/${id}`, data),
+  delete: (id) => api.delete(`/customers/networks/${id}`),
+}
+
+// ===========================================
 // SYSTEM
 // ===========================================
 export const systemApi = {

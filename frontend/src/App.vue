@@ -145,6 +145,7 @@ const menuItems = [
   { title: 'Agents', icon: 'mdi-server-network', to: '/agents', value: 'agents' },
   { title: 'Devices', icon: 'mdi-devices', to: '/devices', value: 'devices' },
   { title: 'Discovery', icon: 'mdi-radar', to: '/discovery', value: 'discovery' },
+  { title: 'Credentials', icon: 'mdi-key', to: '/credentials', value: 'credentials' },
   { title: 'Backups', icon: 'mdi-backup-restore', to: '/backups', value: 'backups' },
   { title: 'Alerts', icon: 'mdi-bell-alert', to: '/alerts', value: 'alerts' },
   { title: 'Settings', icon: 'mdi-cog', to: '/settings', value: 'settings' },
