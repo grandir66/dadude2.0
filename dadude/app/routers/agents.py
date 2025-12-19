@@ -14,6 +14,7 @@ from loguru import logger
 
 from ..services.customer_service import get_customer_service
 from ..services.encryption_service import get_encryption_service
+from ..models.customer_schemas import AgentAssignmentListResponse
 
 router = APIRouter(prefix="/agents", tags=["Agents"])
 
@@ -88,6 +89,41 @@ class AgentUpdateRequest(BaseModel):
     poll_interval: Optional[int] = None
     assigned_networks: Optional[List[str]] = None
     active: Optional[bool] = None
+
+
+# ==========================================
+# AGENTS LIST ENDPOINTS
+# ==========================================
+
+@router.get("", response_model=AgentAssignmentListResponse)
+async def list_agents(
+    customer_id: Optional[str] = Query(None, description="Filtra per cliente"),
+    active_only: bool = Query(True, description="Solo agent attivi"),
+):
+    """
+    Lista tutti gli agent registrati nel sistema.
+    """
+    try:
+        service = get_customer_service()
+        agents = service.list_agents(customer_id=customer_id, active_only=active_only)
+        return AgentAssignmentListResponse(total=len(agents), agents=agents)
+    except Exception as e:
+        logger.error(f"Error listing agents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{agent_id}")
+async def get_agent(agent_id: str):
+    """
+    Ottiene dettagli di un agent specifico.
+    """
+    service = get_customer_service()
+    agent = service.get_agent(agent_id)
+
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} non trovato")
+
+    return agent
 
 
 # ==========================================

@@ -257,7 +257,7 @@ async function loadAgents() {
   try {
     loading.value = true
     const data = await agentsApi.getAll()
-    agents.value = data.items || data || []
+    agents.value = data.agents || data || []
   } catch (error) {
     console.error('Error loading agents:', error)
   } finally {
@@ -268,7 +268,7 @@ async function loadAgents() {
 async function loadCustomers() {
   try {
     const data = await customersApi.getAll()
-    customers.value = data.items || data || []
+    customers.value = data.customers || data || []
   } catch (error) {
     console.error('Error loading customers:', error)
   }

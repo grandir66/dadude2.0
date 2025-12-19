@@ -266,7 +266,7 @@ async function loadCustomers() {
   try {
     loading.value = true
     const data = await customersApi.getAll({ active_only: false })
-    customers.value = data.items || data || []
+    customers.value = data.customers || data || []
   } catch (error) {
     console.error('Error loading customers:', error)
   } finally {
