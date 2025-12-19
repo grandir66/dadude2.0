@@ -10,6 +10,7 @@ jinja2>=3.1.0
 
 # RouterOS API
 routeros-api>=0.17.0
+librouteros>=3.2.0
 
 # Database
 sqlalchemy>=2.0.0
