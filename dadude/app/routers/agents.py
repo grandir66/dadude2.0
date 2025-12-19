@@ -318,17 +318,20 @@ async def start_agent_scan(agent_id: str, data: ScanRequest):
 
             # Save discovered devices
             devices_found = 0
-            if scan_results.get("success") and scan_results.get("devices"):
-                for dev in scan_results["devices"]:
+            devices_list = scan_results.get("devices") or scan_results.get("results") or []
+            if scan_results.get("success") and devices_list:
+                for dev in devices_list:
+                    # Get hostname from identity or hostname field
+                    hostname = dev.get("hostname") or dev.get("identity") or ""
                     device = DiscoveredDevice(
                         id=str(uuid.uuid4())[:8],
                         scan_id=scan_id,
                         customer_id=agent.customer_id,
                         address=dev.get("address", ""),
                         mac_address=dev.get("mac_address", ""),
-                        hostname=dev.get("hostname", ""),
-                        platform=dev.get("platform", "unknown"),
-                        source="mikrotik_scan",
+                        hostname=hostname,
+                        platform=dev.get("platform") or "unknown",
+                        source=dev.get("source", "mikrotik"),
                     )
                     session.add(device)
                     devices_found += 1

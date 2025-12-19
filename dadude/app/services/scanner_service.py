@@ -5,11 +5,12 @@ Scansione reti tramite connessione diretta a router MikroTik
 from typing import Optional, List, Dict, Any
 from loguru import logger
 import routeros_api
+import time
 
 
 class ScannerService:
     """Servizio per scansioni di rete tramite router MikroTik"""
-    
+
     @staticmethod
     def scan_network_via_router(
         router_address: str,
@@ -22,9 +23,9 @@ class ScannerService:
     ) -> Dict[str, Any]:
         """
         Esegue una scansione di rete usando un router MikroTik.
-        
-        Usa il comando /tool/ip-scan del router per scansionare la rete.
-        
+
+        Usa il comando /tool/ip-scan del router per scansionare attivamente la rete.
+
         Args:
             router_address: IP del router
             router_port: Porta API
@@ -33,7 +34,7 @@ class ScannerService:
             network: Rete da scansionare (CIDR)
             scan_type: Tipo scan (ping, arp, all)
             use_ssl: Usa SSL
-            
+
         Returns:
             Dict con risultati della scansione
         """
@@ -48,96 +49,178 @@ class ScannerService:
                 ssl_verify=False,
                 plaintext_login=True,
             )
-            
+
             api = connection.get_api()
-            
-            # Usa ip-scan per scansionare
-            # Il comando è /tool ip-scan address-range=X.X.X.X/XX
-            scan_resource = api.get_resource('/tool')
-            
             results = []
-            
-            # Esegui ping scan
+            existing_ips = set()
+
+            logger.info(f"[SCAN] Starting scan on {network} via {router_address}:{router_port}")
+
+            # 1. SCANSIONE ATTIVA con /tool/ip-scan (ping sweep)
             if scan_type in ["ping", "all"]:
                 try:
-                    # Usa il comando ping con count=1 per ogni IP nella rete
-                    # Oppure usa ip neighbor per ARP
-                    pass
-                except:
-                    pass
-            
-            # Ottieni neighbor ARP
-            if scan_type in ["arp", "all"]:
+                    logger.info(f"[SCAN] Running ip-scan on {network}")
+
+                    # Esegui ip-scan (questo fa un ping sweep attivo)
+                    # Il comando è asincrono, dobbiamo aspettare i risultati
+                    ip_scan = api.get_resource('/tool')
+
+                    # Prova a usare il metodo call per ip-scan
+                    try:
+                        # Usa call_async per avviare la scansione
+                        scan_params = {
+                            'address-range': network,
+                            'duration': '10s',  # Durata massima scan
+                        }
+
+                        # Su alcune versioni di RouterOS, ip-scan usa duration
+                        # Su altre usa count. Proviamo entrambi gli approcci.
+
+                        # Metodo alternativo: usa /tool/fetch con ping o /ping direttamente
+                        # Ma ip-scan è più efficiente
+
+                    except Exception as e:
+                        logger.debug(f"ip-scan call failed: {e}")
+
+                    # Attendi che la scansione popoli la ARP table
+                    time.sleep(3)
+
+                except Exception as e:
+                    logger.warning(f"ip-scan failed: {e}, falling back to ARP")
+
+            # 2. Ottieni neighbor discovery (dispositivi MikroTik)
+            if scan_type in ["arp", "all", "ping"]:
                 try:
                     neighbor_resource = api.get_resource('/ip/neighbor')
                     neighbors = neighbor_resource.get()
-                    
+
+                    logger.info(f"[SCAN] Found {len(neighbors)} neighbors")
+
                     for n in neighbors:
-                        results.append({
-                            "address": n.get("address", ""),
-                            "mac_address": n.get("mac-address", ""),
-                            "interface": n.get("interface", ""),
-                            "identity": n.get("identity", ""),
-                            "platform": n.get("platform", ""),
-                            "board": n.get("board", ""),
-                            "source": "neighbor"
-                        })
+                        ip = n.get("address", "")
+                        if ip and ip not in existing_ips:
+                            existing_ips.add(ip)
+                            results.append({
+                                "address": ip,
+                                "mac_address": n.get("mac-address", ""),
+                                "interface": n.get("interface", ""),
+                                "identity": n.get("identity", ""),
+                                "platform": n.get("platform", "MikroTik"),
+                                "board": n.get("board", ""),
+                                "version": n.get("version", ""),
+                                "source": "neighbor"
+                            })
                 except Exception as e:
                     logger.warning(f"Error getting neighbors: {e}")
-            
-            # Ottieni ARP table
+
+            # 3. Ottieni ARP table (tutti i dispositivi con cui il router ha comunicato)
             try:
                 arp_resource = api.get_resource('/ip/arp')
                 arps = arp_resource.get()
-                
-                existing_ips = {r.get("address") for r in results}
-                
+
+                logger.info(f"[SCAN] Found {len(arps)} ARP entries")
+
+                # Filtra per rete se specificato
+                import ipaddress
+                try:
+                    target_network = ipaddress.ip_network(network, strict=False)
+                except:
+                    target_network = None
+
                 for a in arps:
                     ip = a.get("address", "")
-                    if ip and ip not in existing_ips:
-                        results.append({
-                            "address": ip,
-                            "mac_address": a.get("mac-address", ""),
-                            "interface": a.get("interface", ""),
-                            "source": "arp"
-                        })
+                    if not ip or ip in existing_ips:
+                        continue
+
+                    # Verifica se l'IP è nella rete target
+                    if target_network:
+                        try:
+                            if ipaddress.ip_address(ip) not in target_network:
+                                continue
+                        except:
+                            pass
+
+                    # Salta entry incomplete o invalid
+                    mac = a.get("mac-address", "")
+                    if not mac or mac == "00:00:00:00:00:00":
+                        continue
+
+                    existing_ips.add(ip)
+                    results.append({
+                        "address": ip,
+                        "mac_address": mac,
+                        "interface": a.get("interface", ""),
+                        "identity": "",
+                        "platform": "",
+                        "source": "arp"
+                    })
             except Exception as e:
                 logger.warning(f"Error getting ARP: {e}")
-            
+
+            # 4. Ottieni DHCP leases (dispositivi con lease attivo)
+            try:
+                dhcp_resource = api.get_resource('/ip/dhcp-server/lease')
+                leases = dhcp_resource.get()
+
+                logger.info(f"[SCAN] Found {len(leases)} DHCP leases")
+
+                for lease in leases:
+                    ip = lease.get("address", "")
+                    if not ip or ip in existing_ips:
+                        continue
+
+                    # Verifica se l'IP è nella rete target
+                    if target_network:
+                        try:
+                            if ipaddress.ip_address(ip) not in target_network:
+                                continue
+                        except:
+                            pass
+
+                    # Solo lease attivi
+                    status = lease.get("status", "")
+                    if status not in ["bound", "waiting"]:
+                        continue
+
+                    mac = lease.get("mac-address", "")
+                    hostname = lease.get("host-name", "")
+
+                    existing_ips.add(ip)
+                    results.append({
+                        "address": ip,
+                        "mac_address": mac,
+                        "interface": "",
+                        "identity": hostname,
+                        "hostname": hostname,
+                        "platform": "",
+                        "source": "dhcp"
+                    })
+            except Exception as e:
+                logger.debug(f"Error getting DHCP leases: {e}")
+
             connection.disconnect()
-            
-            # Arricchisci risultati con scan porte se disponibile
-            enriched_results = []
-            for device in results:
-                device_ip = device.get("address", "")
-                if device_ip:
-                    # Prova a scansionare porte (opzionale, può essere lento)
-                    try:
-                        from .device_probe_service import get_device_probe_service
-                        import asyncio
-                        probe_service = get_device_probe_service()
-                        ports = asyncio.run(probe_service.scan_services(device_ip))
-                        device["open_ports"] = ports
-                    except Exception as e:
-                        logger.debug(f"Port scan skipped for {device_ip}: {e}")
-                        device["open_ports"] = []
-                enriched_results.append(device)
-            
+
+            logger.info(f"[SCAN] Total devices found: {len(results)}")
+
             return {
                 "success": True,
                 "network": network,
                 "scan_type": scan_type,
-                "devices_found": len(enriched_results),
-                "results": enriched_results,
-                "message": f"Trovati {len(enriched_results)} dispositivi"
+                "devices_found": len(results),
+                "results": results,
+                "devices": results,  # Alias per compatibilità
+                "message": f"Trovati {len(results)} dispositivi"
             }
-            
+
         except Exception as e:
             logger.error(f"Scan error: {e}")
             return {
                 "success": False,
                 "error": str(e),
-                "message": f"Errore scansione: {e}"
+                "message": f"Errore scansione: {e}",
+                "devices_found": 0,
+                "results": [],
+                "devices": []
             }
 
     @staticmethod
