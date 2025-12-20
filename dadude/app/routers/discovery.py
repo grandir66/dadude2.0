@@ -271,13 +271,11 @@ async def start_scan(data: dict):
     """
     Avvia una scansione di rete (endpoint per frontend Vue).
     Esegue la scansione tramite l'agent MikroTik selezionato.
+    Restituisce i dispositivi trovati direttamente senza salvarli nel database.
     """
     from ..services.customer_service import get_customer_service
     from ..services.scanner_service import get_scanner_service
-    from ..models.database import ScanResult, DiscoveredDevice, init_db, get_session
-    from ..config import get_settings
     import uuid
-    from datetime import datetime
 
     customer_id = data.get("customer_id")
     agent_id = data.get("agent_id")
@@ -294,90 +292,52 @@ async def start_scan(data: dict):
     if not agent:
         raise HTTPException(status_code=404, detail="Agent non trovato")
 
-    settings = get_settings()
-    db_url = settings.database_url_sync_computed
-    engine = init_db(db_url)
-    session = get_session(engine)
+    # Execute scan via MikroTik router
+    scanner = get_scanner_service()
+    logger.info(f"[DISCOVERY] Starting scan: agent={agent.name}, address={agent.address}:{agent.port}, network={network_cidr}, type={scan_type}")
+    logger.info(f"[DISCOVERY] Agent credentials: username={agent.username}, password={'SET' if agent.password else 'EMPTY'}")
 
     try:
-        # Create scan record
-        scan_id = str(uuid.uuid4())[:8]
-        scan = ScanResult(
-            id=scan_id,
-            customer_id=customer_id,
-            agent_id=agent_id,
-            network_cidr=network_cidr,
+        scan_results = scanner.scan_network_via_router(
+            router_address=agent.address,
+            router_port=agent.port or 8728,
+            router_username=agent.username or 'admin',
+            router_password=agent.password or '',
+            network=network_cidr,
             scan_type=scan_type,
-            status="running",
+            use_ssl=getattr(agent, 'use_ssl', False),
         )
-        session.add(scan)
-        session.commit()
+        logger.info(f"[DISCOVERY] Scan results: success={scan_results.get('success')}, devices={len(scan_results.get('devices', []))}")
 
-        # Execute scan via MikroTik router
-        scanner = get_scanner_service()
-        logger.info(f"[DISCOVERY] Starting scan: agent={agent.name}, address={agent.address}:{agent.port}, network={network_cidr}, type={scan_type}")
-        logger.info(f"[DISCOVERY] Agent credentials: username={agent.username}, password={'SET' if agent.password else 'EMPTY'}")
-        try:
-            scan_results = scanner.scan_network_via_router(
-                router_address=agent.address,
-                router_port=agent.port or 8728,
-                router_username=agent.username or 'admin',
-                router_password=agent.password or '',
-                network=network_cidr,
-                scan_type=scan_type,
-                use_ssl=getattr(agent, 'use_ssl', False),
-            )
-            logger.info(f"[DISCOVERY] Scan results: success={scan_results.get('success')}, devices={len(scan_results.get('devices', []))}")
+        # Prepara i dispositivi per la risposta (senza salvarli nel DB)
+        devices_list = scan_results.get("devices") or scan_results.get("results") or []
+        devices = []
+        for dev in devices_list:
+            hostname = dev.get("hostname") or dev.get("identity") or ""
+            devices.append({
+                "id": str(uuid.uuid4())[:8],  # ID temporaneo
+                "address": dev.get("address", ""),
+                "mac_address": dev.get("mac_address", ""),
+                "hostname": hostname,
+                "platform": dev.get("platform") or "unknown",
+                "source": dev.get("source", "scan"),
+            })
 
-            # Save discovered devices
-            devices_found = 0
-            devices_list = scan_results.get("devices") or scan_results.get("results") or []
-            if scan_results.get("success") and devices_list:
-                for dev in devices_list:
-                    # Get hostname from identity or hostname field
-                    hostname = dev.get("hostname") or dev.get("identity") or ""
-                    device = DiscoveredDevice(
-                        id=str(uuid.uuid4())[:8],
-                        scan_id=scan_id,
-                        customer_id=customer_id,
-                        address=dev.get("address", ""),
-                        mac_address=dev.get("mac_address", ""),
-                        hostname=hostname,
-                        platform=dev.get("platform") or "unknown",
-                        source=dev.get("source", "scan"),
-                    )
-                    session.add(device)
-                    devices_found += 1
+        return {
+            "success": True,
+            "message": f"Scan completed: {len(devices)} devices found",
+            "devices_found": len(devices),
+            "devices": devices,  # Restituisce i dispositivi direttamente
+        }
 
-            # Update scan record
-            scan.status = "completed" if scan_results.get("success") else "failed"
-            scan.devices_found = devices_found
-            session.commit()
-
-            return {
-                "success": True,
-                "scan_id": scan_id,
-                "message": f"Scan completed: {devices_found} devices found",
-                "devices_found": devices_found,
-            }
-
-        except Exception as scan_error:
-            # Update scan record with error
-            scan.status = "failed"
-            scan.completed_at = datetime.utcnow()
-            session.commit()
-            logger.error(f"Scan execution error: {scan_error}")
-            return {
-                "success": False,
-                "scan_id": scan_id,
-                "message": f"Scan failed: {str(scan_error)}",
-            }
-
-    except Exception as e:
-        logger.error(f"Start scan error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        session.close()
+    except Exception as scan_error:
+        logger.error(f"Scan execution error: {scan_error}")
+        return {
+            "success": False,
+            "message": f"Scan failed: {str(scan_error)}",
+            "devices_found": 0,
+            "devices": [],
+        }
 
 
 @router.post("/devices/{device_id}/import")

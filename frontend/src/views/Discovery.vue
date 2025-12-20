@@ -58,79 +58,17 @@
       </v-col>
     </v-row>
 
-    <!-- Tabs -->
+    <!-- Discovered Devices -->
     <v-card>
-      <v-tabs v-model="activeTab" color="primary">
-        <v-tab value="scans">
-          <v-icon start>mdi-history</v-icon>
-          Scan History
-        </v-tab>
-        <v-tab value="discovered">
-          <v-icon start>mdi-devices</v-icon>
-          Discovered Devices
-        </v-tab>
-      </v-tabs>
+      <v-card-title class="d-flex align-center">
+        <v-icon start>mdi-devices</v-icon>
+        Discovered Devices
+        <v-chip v-if="discoveredDevices.length > 0" class="ml-2" color="primary" size="small">
+          {{ discoveredDevices.length }}
+        </v-chip>
+      </v-card-title>
 
       <v-divider></v-divider>
-
-      <v-window v-model="activeTab">
-        <!-- Scan History Tab -->
-        <v-window-item value="scans">
-          <v-card-text>
-            <v-data-table
-              :headers="scanHeaders"
-              :items="scans"
-              :loading="loadingScans"
-              hover
-              @click:row="(event, { item }) => viewScanDevices(item)"
-            >
-              <template v-slot:item.status="{ item }">
-                <v-chip
-                  :color="getStatusColor(item.status)"
-                  size="small"
-                  variant="tonal"
-                >
-                  <v-icon v-if="item.status === 'running'" start size="small" class="rotating">mdi-loading</v-icon>
-                  {{ item.status }}
-                </v-chip>
-              </template>
-              <template v-slot:item.scan_type="{ item }">
-                <v-chip size="small" variant="tonal">{{ item.scan_type }}</v-chip>
-              </template>
-              <template v-slot:item.network_cidr="{ item }">
-                <code>{{ item.network_cidr || '-' }}</code>
-              </template>
-              <template v-slot:item.devices_found="{ item }">
-                <v-chip size="small" color="success" variant="tonal">
-                  {{ item.devices_found || 0 }}
-                </v-chip>
-              </template>
-              <template v-slot:item.created_at="{ item }">
-                {{ formatDate(item.created_at) }}
-              </template>
-              <template v-slot:item.actions="{ item }">
-                <v-btn
-                  icon="mdi-eye"
-                  size="small"
-                  variant="text"
-                  @click.stop="viewScanDevices(item)"
-                  title="View devices"
-                ></v-btn>
-                <v-btn
-                  icon="mdi-refresh"
-                  size="small"
-                  variant="text"
-                  @click.stop="repeatScan(item)"
-                  title="Repeat scan"
-                  :disabled="item.status === 'running'"
-                ></v-btn>
-              </template>
-            </v-data-table>
-          </v-card-text>
-        </v-window-item>
-
-        <!-- Discovered Devices Tab -->
-        <v-window-item value="discovered">
           <v-card-text>
             <!-- Filters -->
             <v-row class="mb-4">
@@ -232,8 +170,6 @@
               </template>
             </v-data-table>
           </v-card-text>
-        </v-window-item>
-      </v-window>
     </v-card>
 
     <!-- New Scan Dialog -->
@@ -626,16 +562,18 @@ async function startScan() {
       include_neighbors: scanFormData.value.include_neighbors
     })
     showScanDialog.value = false
+
+    // Mostra i dispositivi trovati direttamente dalla risposta
+    if (result.devices && result.devices.length > 0) {
+      discoveredDevices.value = result.devices
+      activeTab.value = 'discovered'
+    }
+
     snackbar.value = {
       show: true,
-      text: result.message || `Scan started: ${result.devices_found || 0} devices found`,
+      text: result.message || `Scan completed: ${result.devices_found || 0} devices found`,
       color: result.success !== false ? 'success' : 'warning'
     }
-    // Reload scans after a delay
-    setTimeout(() => {
-      loadScans()
-      loadDiscoveredDevices()
-    }, 2000)
   } catch (error) {
     console.error('Error starting scan:', error)
     const errorMsg = error.response?.data?.detail || error.message || 'Unknown error'
