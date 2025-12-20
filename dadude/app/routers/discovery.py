@@ -354,8 +354,9 @@ async def start_scan(data: dict):
 async def import_device(device_id: str, data: dict):
     """
     Importa un dispositivo scoperto nell'inventario.
+    Accetta i dati del dispositivo direttamente (per scansioni transienti).
     """
-    from ..models.database import DiscoveredDevice, init_db, get_session
+    from ..models.database import init_db, get_session
     from ..models.inventory import InventoryDevice
     from ..config import get_settings
     import uuid
@@ -365,43 +366,66 @@ async def import_device(device_id: str, data: dict):
     if not customer_id:
         raise HTTPException(status_code=400, detail="customer_id required")
 
+    # Device data can come directly from the request (transient scans)
+    device_data = data.get("device", {})
+    address = device_data.get("address") or data.get("address")
+    if not address:
+        raise HTTPException(status_code=400, detail="Device address is required")
+
     settings = get_settings()
     db_url = settings.database_url_sync_computed
     engine = init_db(db_url)
     session = get_session(engine)
 
     try:
-        # Find discovered device
-        discovered = session.query(DiscoveredDevice).filter(
-            DiscoveredDevice.id == device_id
+        # Check if device already exists in inventory
+        existing = session.query(InventoryDevice).filter(
+            InventoryDevice.primary_ip == address,
+            InventoryDevice.customer_id == customer_id
         ).first()
 
-        if not discovered:
-            raise HTTPException(status_code=404, detail="Device not found")
+        if existing:
+            return {
+                "success": False,
+                "device_id": existing.id,
+                "message": f"Device {address} already exists in inventory"
+            }
 
-        # Create inventory device
+        # Create inventory device from request data
+        hostname = device_data.get("hostname") or data.get("hostname") or ""
+        mac_address = device_data.get("mac_address") or data.get("mac_address") or ""
+        vendor = device_data.get("vendor") or data.get("vendor") or ""
+        device_type = device_data.get("device_type") or data.get("device_type") or "other"
+        platform = device_data.get("platform") or data.get("platform") or ""
+
         inventory_device = InventoryDevice(
             id=str(uuid.uuid4())[:8],
             customer_id=customer_id,
-            address=discovered.address,
-            hostname=discovered.hostname,
-            mac_address=discovered.mac_address,
-            platform=discovered.platform,
-            source="discovery",
-            discovered_at=datetime.utcnow(),
+            name=hostname or address,  # name is required
+            hostname=hostname,
+            primary_ip=address,
+            mac_address=mac_address,
+            primary_mac=mac_address,
+            manufacturer=vendor,
+            device_type=device_type,
+            category=platform or None,
+            status="unknown",
+            identified_by="discovery_scan",
         )
         session.add(inventory_device)
-
-        # Mark as imported
-        discovered.imported = True
-        discovered.customer_id = customer_id
         session.commit()
+
+        logger.info(f"[IMPORT] Device imported: {address} -> customer {customer_id}")
 
         return {
             "success": True,
             "device_id": inventory_device.id,
-            "message": f"Device {discovered.address} imported"
+            "message": f"Device {address} imported successfully"
         }
+    except Exception as e:
+        session.rollback()
+        logger.error(f"[IMPORT] Error importing device: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
         session.close()
 

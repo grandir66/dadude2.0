@@ -637,9 +637,23 @@ async function importDevices() {
 
     for (const deviceId of selectedDevices.value) {
       try {
-        await discoveryApi.importDevice(deviceId, importCustomerId.value)
-        successCount++
+        // Find the device data from discoveredDevices
+        const device = discoveredDevices.value.find(d => d.id === deviceId)
+        if (device) {
+          await discoveryApi.importDevice(deviceId, importCustomerId.value, {
+            address: device.address,
+            hostname: device.hostname,
+            mac_address: device.mac_address,
+            platform: device.platform,
+            vendor: device.vendor,
+            device_type: device.device_type
+          })
+          // Mark as imported in local state
+          device.imported = true
+          successCount++
+        }
       } catch (e) {
+        console.error('Import error:', e)
         failCount++
       }
     }
@@ -652,8 +666,6 @@ async function importDevices() {
     } else {
       snackbar.value = { show: true, text: `Imported ${successCount}, failed ${failCount}`, color: 'warning' }
     }
-
-    loadDiscoveredDevices()
   } catch (error) {
     console.error('Error importing devices:', error)
     const errorMsg = error.response?.data?.detail || error.message || 'Unknown error'

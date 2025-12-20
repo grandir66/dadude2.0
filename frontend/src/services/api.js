@@ -105,7 +105,11 @@ export const discoveryApi = {
   getScanResults: (params) => api.get('/discovery/scans', { params }),
   getDiscoveredDevices: (scanId) => api.get(`/discovery/scans/${scanId}/devices`),
   startScan: (data) => api.post('/discovery/scan', data),
-  importDevice: (deviceId, customerId) => api.post(`/discovery/devices/${deviceId}/import`, { customer_id: customerId }),
+  importDevice: (deviceId, customerId, deviceData = {}) => api.post(`/discovery/devices/${deviceId}/import`, {
+    customer_id: customerId,
+    device: deviceData,
+    ...deviceData  // Also spread at top level for backwards compatibility
+  }),
 }
 
 // ===========================================
