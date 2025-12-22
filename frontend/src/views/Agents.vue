@@ -3,7 +3,15 @@
     <!-- Header -->
     <v-row class="mb-4">
       <v-col>
-        <h1 class="text-h4">Agents</h1>
+        <h1 class="text-h4">
+          Agents
+          <v-badge
+            v-if="pendingAgents.length > 0"
+            :content="pendingAgents.length"
+            color="warning"
+            inline
+          ></v-badge>
+        </h1>
       </v-col>
       <v-col cols="auto">
         <v-btn
@@ -15,6 +23,97 @@
         </v-btn>
       </v-col>
     </v-row>
+
+    <!-- Pending Agents Section -->
+    <v-expand-transition>
+      <v-card v-if="pendingAgents.length > 0" class="mb-4" color="warning" variant="tonal">
+        <v-card-title class="d-flex align-center">
+          <v-icon start>mdi-alert-circle</v-icon>
+          Pending Approval ({{ pendingAgents.length }})
+          <v-spacer></v-spacer>
+          <v-btn
+            variant="text"
+            size="small"
+            @click="showPendingExpanded = !showPendingExpanded"
+          >
+            {{ showPendingExpanded ? 'Collapse' : 'Expand' }}
+          </v-btn>
+        </v-card-title>
+        <v-expand-transition>
+          <v-card-text v-if="showPendingExpanded">
+            <v-row>
+              <v-col
+                v-for="agent in pendingAgents"
+                :key="agent.id"
+                cols="12"
+                sm="6"
+                md="4"
+              >
+                <v-card variant="outlined">
+                  <v-card-item>
+                    <template v-slot:prepend>
+                      <v-avatar color="warning" size="40">
+                        <v-icon :icon="agent.agent_type === 'docker' ? 'mdi-docker' : 'mdi-router-wireless'" color="white"></v-icon>
+                      </v-avatar>
+                    </template>
+                    <v-card-title>{{ agent.name || 'Unknown Agent' }}</v-card-title>
+                    <v-card-subtitle>{{ agent.address }}{{ agent.port ? ':' + agent.port : '' }}</v-card-subtitle>
+                  </v-card-item>
+                  <v-card-text>
+                    <v-row dense>
+                      <v-col cols="6">
+                        <div class="text-caption text-grey">Type</div>
+                        <v-chip size="x-small" variant="tonal">{{ agent.agent_type || 'docker' }}</v-chip>
+                      </v-col>
+                      <v-col cols="6">
+                        <div class="text-caption text-grey">Version</div>
+                        <span>{{ agent.version || '-' }}</span>
+                      </v-col>
+                      <v-col cols="12" v-if="agent.capabilities?.length">
+                        <div class="text-caption text-grey">Capabilities</div>
+                        <v-chip
+                          v-for="cap in agent.capabilities.slice(0, 4)"
+                          :key="cap"
+                          size="x-small"
+                          class="mr-1"
+                          variant="tonal"
+                        >
+                          {{ cap }}
+                        </v-chip>
+                      </v-col>
+                      <v-col cols="12">
+                        <div class="text-caption text-grey">Registered</div>
+                        <span>{{ formatDate(agent.created_at) }}</span>
+                      </v-col>
+                    </v-row>
+                  </v-card-text>
+                  <v-card-actions>
+                    <v-btn
+                      color="success"
+                      variant="tonal"
+                      size="small"
+                      prepend-icon="mdi-check"
+                      @click="openApproveDialog(agent)"
+                    >
+                      Approve
+                    </v-btn>
+                    <v-btn
+                      color="error"
+                      variant="text"
+                      size="small"
+                      prepend-icon="mdi-delete"
+                      @click="deleteAgent(agent)"
+                    >
+                      Reject
+                    </v-btn>
+                  </v-card-actions>
+                </v-card>
+              </v-col>
+            </v-row>
+          </v-card-text>
+        </v-expand-transition>
+      </v-card>
+    </v-expand-transition>
 
     <!-- Agent Cards Grid -->
     <v-row>
@@ -201,6 +300,44 @@
       </v-card>
     </v-dialog>
 
+    <!-- Approve Agent Dialog -->
+    <v-dialog v-model="showApproveDialog" max-width="500">
+      <v-card>
+        <v-card-title>
+          <v-icon start color="success">mdi-check-circle</v-icon>
+          Approve Agent
+        </v-card-title>
+        <v-card-text>
+          <v-alert type="info" variant="tonal" class="mb-4">
+            Approving agent: <strong>{{ agentToApprove?.name }}</strong>
+            <br>
+            <span class="text-grey">{{ agentToApprove?.address }}</span>
+          </v-alert>
+          <v-select
+            v-model="approveCustomerId"
+            :items="customers"
+            item-title="name"
+            item-value="id"
+            label="Assign to Customer *"
+            :rules="[v => !!v || 'Customer is required']"
+            prepend-inner-icon="mdi-domain"
+          ></v-select>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn variant="text" @click="showApproveDialog = false">Cancel</v-btn>
+          <v-btn
+            color="success"
+            @click="confirmApprove"
+            :loading="approving"
+            :disabled="!approveCustomerId"
+          >
+            Approve
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Snackbar for notifications -->
     <v-snackbar v-model="snackbar.show" :color="snackbar.color" :timeout="3000">
       {{ snackbar.text }}
@@ -301,14 +438,20 @@ const loading = ref(false)
 const saving = ref(false)
 const deleting = ref(false)
 const scanning = ref(false)
+const approving = ref(false)
 const testingAgent = ref(null)
 const agents = ref([])
+const pendingAgents = ref([])
 const customers = ref([])
 const showCreateDialog = ref(false)
 const showDeleteDialog = ref(false)
 const showScanDialog = ref(false)
+const showApproveDialog = ref(false)
+const showPendingExpanded = ref(true)
 const editingAgent = ref(null)
 const agentToDelete = ref(null)
+const agentToApprove = ref(null)
+const approveCustomerId = ref(null)
 const scanAgent = ref(null)
 const scanNetwork = ref('')
 const scanType = ref('ping')
@@ -344,6 +487,43 @@ async function loadCustomers() {
     customers.value = data.customers || data || []
   } catch (error) {
     console.error('Error loading customers:', error)
+  }
+}
+
+async function loadPendingAgents() {
+  try {
+    const data = await agentsApi.getPending()
+    pendingAgents.value = data.agents || data || []
+  } catch (error) {
+    console.error('Error loading pending agents:', error)
+    pendingAgents.value = []
+  }
+}
+
+function openApproveDialog(agent) {
+  agentToApprove.value = agent
+  approveCustomerId.value = null
+  showApproveDialog.value = true
+}
+
+async function confirmApprove() {
+  if (!agentToApprove.value || !approveCustomerId.value) return
+
+  try {
+    approving.value = true
+    await agentsApi.approve(agentToApprove.value.id, { customer_id: approveCustomerId.value })
+    showApproveDialog.value = false
+    snackbar.value = { show: true, text: `Agent "${agentToApprove.value.name}" approved successfully`, color: 'success' }
+    agentToApprove.value = null
+    approveCustomerId.value = null
+    // Reload both lists
+    loadPendingAgents()
+    loadAgents()
+  } catch (error) {
+    console.error('Error approving agent:', error)
+    snackbar.value = { show: true, text: 'Approval failed: ' + (error.response?.data?.detail || error.message), color: 'error' }
+  } finally {
+    approving.value = false
   }
 }
 
@@ -469,6 +649,7 @@ function formatDate(date) {
 onMounted(() => {
   loadAgents()
   loadCustomers()
+  loadPendingAgents()
 
   // Subscribe to agent status updates
   wsStore.subscribe('agent_connected', (data) => {
@@ -479,6 +660,11 @@ onMounted(() => {
   wsStore.subscribe('agent_disconnected', (data) => {
     const agent = agents.value.find(a => a.id === data.agent_id)
     if (agent) agent.status = 'offline'
+  })
+
+  // Subscribe to new agent registrations
+  wsStore.subscribe('agent_registered', () => {
+    loadPendingAgents()
   })
 })
 </script>

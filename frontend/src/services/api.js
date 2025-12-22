@@ -78,6 +78,8 @@ export const agentsApi = {
   create: (data) => api.post('/agents', data),
   update: (id, data) => api.put(`/agents/${id}`, data),
   delete: (id) => api.delete(`/agents/${id}`),
+  // Pending agents
+  getPending: () => api.get('/agents/pending'),
   // Actions
   testConnection: (id) => api.post(`/agents/${id}/test-connection`),
   startScan: (id, data) => api.post(`/agents/${id}/scan`, data),
