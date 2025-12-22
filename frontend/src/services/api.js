@@ -82,6 +82,19 @@ export const agentsApi = {
   testConnection: (id) => api.post(`/agents/${id}/test-connection`),
   startScan: (id, data) => api.post(`/agents/${id}/scan`, data),
   getStatus: (id) => api.get(`/agents/${id}/status`),
+  getConfig: (id) => api.get(`/agents/config/${id}`),
+  updateConfig: (id, data) => api.put(`/agents/${id}/config`, data),
+  // Commands
+  exec: (id, command) => api.post(`/agents/${id}/exec`, { command }),
+  restart: (id) => api.post(`/agents/${id}/restart`),
+  // Updates
+  checkUpdate: (id) => api.get(`/agents/${id}/check-update`),
+  triggerUpdate: (id) => api.post(`/agents/${id}/trigger-update`),
+  // Certificate
+  getCertificate: (id) => api.get(`/agents/${id}/certificate`),
+  renewCertificate: (id) => api.post(`/agents/${id}/renew`),
+  // Approve pending agent
+  approve: (id, data) => api.post(`/agents/${id}/approve`, data),
 }
 
 // ===========================================

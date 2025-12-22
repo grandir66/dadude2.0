@@ -272,16 +272,20 @@ async def start_scan(data: dict):
     Avvia una scansione di rete (endpoint per frontend Vue).
     Esegue la scansione tramite l'agent MikroTik selezionato.
     Restituisce i dispositivi trovati direttamente senza salvarli nel database.
+    Se scan_ports=True, esegue anche una scansione delle porte TCP comuni.
     """
     from ..services.customer_service import get_customer_service
     from ..services.scanner_service import get_scanner_service
     from ..services.mac_vendor_service import get_mac_vendor_service
+    from ..services.device_probe_service import get_probe_service
     import uuid
+    import asyncio
 
     customer_id = data.get("customer_id")
     agent_id = data.get("agent_id")
     network_cidr = data.get("network_cidr")
     scan_type = data.get("scan_type", "ping")
+    scan_ports = data.get("scan_ports", False)
 
     if not customer_id or not agent_id:
         raise HTTPException(status_code=400, detail="customer_id and agent_id required")
@@ -295,7 +299,7 @@ async def start_scan(data: dict):
 
     # Execute scan via MikroTik router
     scanner = get_scanner_service()
-    logger.info(f"[DISCOVERY] Starting scan: agent={agent.name}, address={agent.address}:{agent.port}, network={network_cidr}, type={scan_type}")
+    logger.info(f"[DISCOVERY] Starting scan: agent={agent.name}, address={agent.address}:{agent.port}, network={network_cidr}, type={scan_type}, scan_ports={scan_ports}")
     logger.info(f"[DISCOVERY] Agent credentials: username={agent.username}, password={'SET' if agent.password else 'EMPTY'}")
 
     try:
@@ -331,11 +335,41 @@ async def start_scan(data: dict):
                 "source": dev.get("source", "scan"),
                 "vendor": vendor_info.get("vendor") or "",
                 "device_type": vendor_info.get("device_type") or "other",
+                "open_ports": [],  # Placeholder for port scan results
             })
+
+        # Se richiesto, esegui port scanning sui dispositivi trovati
+        if scan_ports and devices:
+            logger.info(f"[DISCOVERY] Starting port scan for {len(devices)} devices")
+            probe_service = get_probe_service()
+
+            async def scan_device_ports(device):
+                """Scansiona le porte di un singolo dispositivo"""
+                try:
+                    address = device.get("address")
+                    if not address:
+                        return device
+
+                    open_ports = await probe_service.scan_services(address)
+                    # Filtra solo le porte aperte
+                    device["open_ports"] = [p for p in open_ports if p.get("open")]
+                    logger.debug(f"[DISCOVERY] Port scan for {address}: {len(device['open_ports'])} open ports")
+                except Exception as e:
+                    logger.warning(f"[DISCOVERY] Port scan failed for {device.get('address')}: {e}")
+                return device
+
+            # Esegui port scan in parallelo (max 10 alla volta per non sovraccaricare)
+            batch_size = 10
+            for i in range(0, len(devices), batch_size):
+                batch = devices[i:i + batch_size]
+                await asyncio.gather(*[scan_device_ports(dev) for dev in batch])
+
+            total_ports = sum(len(d.get("open_ports", [])) for d in devices)
+            logger.info(f"[DISCOVERY] Port scan completed: {total_ports} total open ports found")
 
         return {
             "success": True,
-            "message": f"Scan completed: {len(devices)} devices found",
+            "message": f"Scan completed: {len(devices)} devices found" + (f", {sum(len(d.get('open_ports', [])) for d in devices)} open ports" if scan_ports else ""),
             "devices_found": len(devices),
             "devices": devices,  # Restituisce i dispositivi direttamente
         }

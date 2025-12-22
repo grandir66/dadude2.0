@@ -138,6 +138,30 @@
                 <span v-if="item.vendor" class="font-weight-medium">{{ item.vendor }}</span>
                 <span v-else class="text-grey">-</span>
               </template>
+              <template v-slot:item.open_ports="{ item }">
+                <div v-if="item.open_ports && item.open_ports.length > 0">
+                  <v-chip
+                    v-for="port in item.open_ports.slice(0, 4)"
+                    :key="port.port"
+                    size="x-small"
+                    class="mr-1 mb-1"
+                    variant="tonal"
+                    color="info"
+                    :title="port.service"
+                  >
+                    {{ port.port }}
+                  </v-chip>
+                  <v-chip
+                    v-if="item.open_ports.length > 4"
+                    size="x-small"
+                    variant="text"
+                    @click="viewDeviceDetail(item)"
+                  >
+                    +{{ item.open_ports.length - 4 }}
+                  </v-chip>
+                </div>
+                <span v-else class="text-grey">-</span>
+              </template>
               <template v-slot:item.platform="{ item }">
                 <v-chip v-if="item.platform" size="small" variant="tonal">
                   {{ item.platform }}
@@ -228,11 +252,20 @@
                   persistent-hint
                 ></v-text-field>
               </v-col>
-              <v-col cols="12">
+              <v-col cols="12" md="6">
                 <v-checkbox
                   v-model="scanFormData.include_neighbors"
                   label="Include MikroTik neighbor discovery"
                   color="primary"
+                  hide-details
+                ></v-checkbox>
+              </v-col>
+              <v-col cols="12" md="6">
+                <v-checkbox
+                  v-model="scanFormData.scan_ports"
+                  label="Scan common ports (slower)"
+                  color="primary"
+                  hide-details
                 ></v-checkbox>
               </v-col>
             </v-row>
@@ -328,17 +361,28 @@
               <v-list-item-subtitle>{{ selectedDevice.source || 'scan' }}</v-list-item-subtitle>
             </v-list-item>
             <v-list-item v-if="selectedDevice.open_ports?.length">
-              <v-list-item-title>Open Ports</v-list-item-title>
+              <v-list-item-title>Open Ports ({{ selectedDevice.open_ports.length }})</v-list-item-title>
               <v-list-item-subtitle>
-                <v-chip
-                  v-for="port in selectedDevice.open_ports"
-                  :key="port.port"
-                  size="x-small"
-                  class="mr-1"
-                  variant="tonal"
-                >
-                  {{ port.port }}/{{ port.protocol }}
-                </v-chip>
+                <v-table density="compact" class="mt-2">
+                  <thead>
+                    <tr>
+                      <th class="text-left">Port</th>
+                      <th class="text-left">Protocol</th>
+                      <th class="text-left">Service</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="port in selectedDevice.open_ports" :key="port.port">
+                      <td><code>{{ port.port }}</code></td>
+                      <td>{{ port.protocol || 'tcp' }}</td>
+                      <td>
+                        <v-chip size="x-small" variant="tonal" color="success">
+                          {{ port.service || 'unknown' }}
+                        </v-chip>
+                      </td>
+                    </tr>
+                  </tbody>
+                </v-table>
               </v-list-item-subtitle>
             </v-list-item>
           </v-list>
@@ -410,7 +454,8 @@ const scanFormData = ref({
   agent_id: null,
   scan_type: 'arp',
   network_cidr: '',
-  include_neighbors: true
+  include_neighbors: true,
+  scan_ports: false
 })
 
 const scanTypes = [
@@ -435,6 +480,7 @@ const deviceHeaders = [
   { title: 'MAC', key: 'mac_address', sortable: true },
   { title: 'Hostname', key: 'hostname', sortable: true },
   { title: 'Vendor', key: 'vendor', sortable: true },
+  { title: 'Ports', key: 'open_ports', sortable: false },
   { title: 'Platform', key: 'platform', sortable: true },
   { title: 'Source', key: 'source', sortable: true },
   { title: 'Imported', key: 'imported', sortable: true, align: 'center' },
@@ -568,7 +614,8 @@ async function startScan() {
       agent_id: scanFormData.value.agent_id,
       scan_type: scanFormData.value.scan_type,
       network_cidr: scanFormData.value.network_cidr || undefined,
-      include_neighbors: scanFormData.value.include_neighbors
+      include_neighbors: scanFormData.value.include_neighbors,
+      scan_ports: scanFormData.value.scan_ports
     })
     showScanDialog.value = false
 
@@ -611,7 +658,8 @@ function repeatScan(scan) {
     agent_id: scan.agent_id,
     scan_type: scan.scan_type,
     network_cidr: scan.network_cidr || '',
-    include_neighbors: true
+    include_neighbors: true,
+    scan_ports: false
   }
   showScanDialog.value = true
 }
