@@ -270,7 +270,8 @@ async def get_scan_devices(scan_id: str):
 async def start_scan(data: dict):
     """
     Avvia una scansione di rete (endpoint per frontend Vue).
-    Esegue la scansione tramite l'agent MikroTik selezionato.
+    - Per scan_type="nmap": usa l'agent remoto via HTTP (richiede dadude-agent con nmap)
+    - Per altri tipi: usa il router MikroTik via RouterOS API
     Restituisce i dispositivi trovati direttamente senza salvarli nel database.
     Se scan_ports=True, esegue anche una scansione delle porte TCP comuni.
     """
@@ -278,6 +279,7 @@ async def start_scan(data: dict):
     from ..services.scanner_service import get_scanner_service
     from ..services.mac_vendor_service import get_mac_vendor_service
     from ..services.device_probe_service import get_probe_service
+    from ..services.agent_client import AgentClient, AgentConfig
     import uuid
     import asyncio
 
@@ -297,12 +299,53 @@ async def start_scan(data: dict):
     if not agent:
         raise HTTPException(status_code=404, detail="Agent non trovato")
 
-    # Execute scan via MikroTik router
-    scanner = get_scanner_service()
-    logger.info(f"[DISCOVERY] Starting scan: agent={agent.name}, address={agent.address}:{agent.port}, network={network_cidr}, type={scan_type}, scan_ports={scan_ports}")
-    logger.info(f"[DISCOVERY] Agent credentials: username={agent.username}, password={'SET' if agent.password else 'EMPTY'}")
+    logger.info(f"[DISCOVERY] Starting scan: agent={agent.name}, address={agent.address}, network={network_cidr}, type={scan_type}, scan_ports={scan_ports}")
 
-    try:
+    # Se scan_type è "nmap", usa l'agent remoto via HTTP
+    if scan_type == "nmap":
+        # Costruisci URL dell'agent
+        agent_url = getattr(agent, 'agent_url', None)
+        if not agent_url:
+            agent_api_port = getattr(agent, 'agent_api_port', 8080)
+            agent_url = f"http://{agent.address}:{agent_api_port}"
+
+        agent_token = getattr(agent, 'agent_token', '') or ''
+
+        # Decripta token se necessario
+        if agent_token and agent_token.startswith('gAAAAA'):
+            try:
+                from ..services.encryption import get_encryption_service
+                encryption = get_encryption_service()
+                agent_token = encryption.decrypt(agent_token)
+            except Exception as e:
+                logger.warning(f"[DISCOVERY] Could not decrypt agent token: {e}")
+                agent_token = ""
+
+        logger.info(f"[DISCOVERY] Using Nmap via agent HTTP: {agent_url}")
+
+        config = AgentConfig(
+            agent_id=agent_id,
+            agent_url=agent_url,
+            agent_token=agent_token,
+            timeout=300,  # 5 minuti per scan Nmap
+        )
+
+        agent_client = AgentClient(config)
+        try:
+            scan_results = await agent_client.scan_network(
+                network=network_cidr,
+                scan_type="nmap",
+                timeout=120,
+            )
+            logger.info(f"[DISCOVERY] Nmap scan results: success={scan_results.get('success')}, devices={len(scan_results.get('results', []))}")
+        finally:
+            await agent_client.close()
+    else:
+        # Per altri tipi di scan, usa MikroTik RouterOS API
+        scanner = get_scanner_service()
+        logger.info(f"[DISCOVERY] Using MikroTik RouterOS: {agent.address}:{agent.port}")
+        logger.info(f"[DISCOVERY] Agent credentials: username={agent.username}, password={'SET' if agent.password else 'EMPTY'}")
+
         scan_results = scanner.scan_network_via_router(
             router_address=agent.address,
             router_port=agent.port or 8728,
@@ -314,7 +357,8 @@ async def start_scan(data: dict):
         )
         logger.info(f"[DISCOVERY] Scan results: success={scan_results.get('success')}, devices={len(scan_results.get('devices', []))}")
 
-        # Prepara i dispositivi per la risposta (senza salvarli nel DB)
+    # Prepara i dispositivi per la risposta (senza salvarli nel DB)
+    try:
         devices_list = scan_results.get("devices") or scan_results.get("results") or []
         devices = []
         mac_vendor_service = get_mac_vendor_service()
@@ -323,8 +367,12 @@ async def start_scan(data: dict):
             hostname = dev.get("hostname") or dev.get("identity") or ""
             mac_address = dev.get("mac_address", "")
 
-            # Lookup vendor from MAC address
-            vendor_info = mac_vendor_service.lookup_vendor_with_type(mac_address)
+            # Lookup vendor from MAC address (solo se non già presente da nmap)
+            existing_vendor = dev.get("vendor", "")
+            if existing_vendor:
+                vendor_info = {"vendor": existing_vendor, "category": "", "device_type": "other"}
+            else:
+                vendor_info = mac_vendor_service.lookup_vendor_with_type(mac_address)
 
             devices.append({
                 "id": str(uuid.uuid4())[:8],  # ID temporaneo
@@ -332,10 +380,10 @@ async def start_scan(data: dict):
                 "mac_address": mac_address,
                 "hostname": hostname,
                 "platform": dev.get("platform") or vendor_info.get("category") or "unknown",
-                "source": dev.get("source", "scan"),
+                "source": dev.get("source", scan_type),
                 "vendor": vendor_info.get("vendor") or "",
                 "device_type": vendor_info.get("device_type") or "other",
-                "open_ports": [],  # Placeholder for port scan results
+                "open_ports": dev.get("open_ports", []),  # Nmap può già restituire open_ports
             })
 
         # Se richiesto, esegui port scanning sui dispositivi trovati

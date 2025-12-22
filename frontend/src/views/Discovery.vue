@@ -461,6 +461,7 @@ const scanFormData = ref({
 const scanTypes = [
   { title: 'ARP Scan (fast)', value: 'arp' },
   { title: 'Ping Scan', value: 'ping' },
+  { title: 'Nmap Scan (accurate)', value: 'nmap' },
   { title: 'SNMP Discovery', value: 'snmp' },
   { title: 'Full Scan (all methods)', value: 'all' }
 ]
