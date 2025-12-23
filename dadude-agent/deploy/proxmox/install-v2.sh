@@ -5,7 +5,7 @@
 # L'agent si auto-registra al server e apparirà nella lista "Pending Approval"
 #
 # Uso:
-#   curl -sSL https://raw.githubusercontent.com/grandir66/dadude/main/dadude-agent/deploy/proxmox/install-v2.sh | bash -s -- --server-url http://IP:8000
+#   ./install-v2.sh --server-url http://IP:8000
 #
 # Opzioni:
 #   --server-url URL      URL del server DaDude (richiesto)
@@ -17,8 +17,18 @@
 #   --vlan TAG            VLAN tag (opzionale)
 #   --storage STORAGE     Storage Proxmox (default: local-lvm)
 #   --memory MB           RAM in MB (default: 512)
+#   --repo URL            URL repository Git (default: vedi sotto)
+#   --branch BRANCH       Branch da usare (default: main)
 #   --yes                 Non chiedere conferma
 #
+
+# ============================================================
+# CONFIGURAZIONE REPOSITORY
+# Modifica questa variabile quando il repo dadude2.0 è pronto
+# ============================================================
+DADUDE_REPO="https://github.com/grandir66/dadude2.0.git"
+DADUDE_BRANCH="main"
+# ============================================================
 
 set -e
 
@@ -61,6 +71,8 @@ while [[ $# -gt 0 ]]; do
         --vlan) VLAN="$2"; shift 2 ;;
         --storage) STORAGE="$2"; shift 2 ;;
         --memory) MEMORY="$2"; shift 2 ;;
+        --repo) DADUDE_REPO="$2"; shift 2 ;;
+        --branch) DADUDE_BRANCH="$2"; shift 2 ;;
         --yes|-y) AUTO_YES=true; shift ;;
         --help|-h)
             echo "Uso: $0 --server-url URL [opzioni]"
@@ -75,6 +87,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --vlan TAG          VLAN tag"
             echo "  --storage NAME      Storage (default: local-lvm)"
             echo "  --memory MB         RAM (default: 512)"
+            echo "  --repo URL          Git repository URL"
+            echo "  --branch BRANCH     Git branch (default: main)"
             echo "  --yes               Non chiedere conferma"
             exit 0
             ;;
@@ -188,6 +202,8 @@ echo "  Bridge:         $BRIDGE"
 echo "  IP:             $IP_CONFIG"
 [ -n "$GATEWAY" ] && echo "  Gateway:        $GATEWAY"
 echo "  Server URL:     $SERVER_URL"
+echo "  Repository:     $DADUDE_REPO"
+echo "  Branch:         $DADUDE_BRANCH"
 echo ""
 echo -e "${CYAN}L'agent si registrerà automaticamente al server.${NC}"
 echo -e "${CYAN}Dovrai approvarlo dalla pagina Agents del frontend.${NC}"
@@ -326,20 +342,20 @@ services:
       - ./data:/var/lib/dadude-agent
 EOF
 
-# Crea Dockerfile per build locale
-cat << 'DOCKERFILE' | pct exec $CTID -- tee /opt/dadude-agent/Dockerfile > /dev/null
+# Crea Dockerfile per build locale (con variabili espanse)
+cat << EOF | pct exec $CTID -- tee /opt/dadude-agent/Dockerfile > /dev/null
 FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libffi-dev iputils-ping dnsutils net-tools iproute2 nmap procps git \
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    gcc libffi-dev iputils-ping dnsutils net-tools iproute2 nmap procps git \\
     && rm -rf /var/lib/apt/lists/*
 
-# Clone agent code
-RUN git clone --depth 1 https://github.com/grandir66/dadude.git /tmp/dadude \
-    && cp -r /tmp/dadude/dadude-agent/app . \
-    && cp /tmp/dadude/dadude-agent/requirements.txt . \
+# Clone agent code from ${DADUDE_REPO} branch ${DADUDE_BRANCH}
+RUN git clone --depth 1 --branch ${DADUDE_BRANCH} ${DADUDE_REPO} /tmp/dadude \\
+    && cp -r /tmp/dadude/dadude-agent/app . \\
+    && cp /tmp/dadude/dadude-agent/requirements.txt . \\
     && rm -rf /tmp/dadude
 
 RUN pip install --no-cache-dir -r requirements.txt
@@ -349,7 +365,7 @@ EXPOSE 8080
 ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "-m", "app.agent"]
-DOCKERFILE
+EOF
 
 # Crea systemd service
 cat << 'SERVICE' | pct exec $CTID -- tee /etc/systemd/system/dadude-agent.service > /dev/null
